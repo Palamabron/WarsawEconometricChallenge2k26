@@ -12,10 +12,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import (
+    average_precision_score,
+    classification_report,
+    f1_score,
+    precision_recall_curve,
+)
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import f1_score, precision_recall_curve, average_precision_score
-
-from sklearn.metrics import classification_report
 from xgboost import XGBClassifier
 
 from src.config import get_config
@@ -24,7 +27,7 @@ from src.feature_factory import FeatureFactory
 from src.validation.cross_validator import create_cross_validator
 from src.validation.leakage_checks import LeakageValidator
 
-warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 def main(args):
@@ -36,7 +39,7 @@ def main(args):
     print("=" * 80)
 
     # 1. Load configuration
-    config = get_config()
+    config = get_config(args.config)
     print(f"\nConfiguration loaded:")
     print(f"  GPU available: {config.use_gpu}")
     print(f"  CV folds: {config.n_folds}")
@@ -47,7 +50,7 @@ def main(args):
     print("STEP 1: Data Loading")
     print("=" * 80)
 
-    data_loader = DataIngestion(use_gpu=config.use_gpu)
+    data_loader = DataIngestion(use_gpu=config.use_gpu, config_path=args.config)
     checkpoint_df, event_dfs = data_loader.load_all()
 
     # 3. Engineer features
@@ -55,7 +58,7 @@ def main(args):
     print("STEP 2: Feature Engineering")
     print("=" * 80)
 
-    factory = FeatureFactory(use_gpu=config.use_gpu)
+    factory = FeatureFactory(config_path=args.config, use_gpu=config.use_gpu)
     feature_df = factory.engineer_features(checkpoint_df, event_dfs)
 
     # 4. Run leakage checks
@@ -63,9 +66,7 @@ def main(args):
     print("STEP 3: Leakage Validation")
     print("=" * 80)
 
-    LeakageValidator.validate_temporal_boundaries(
-        feature_df, checkpoint_df, event_dfs
-    )
+    LeakageValidator.validate_temporal_boundaries(feature_df, checkpoint_df, event_dfs)
 
     # 5. Prepare data for modeling
     print("\n" + "=" * 80)
@@ -76,14 +77,22 @@ def main(args):
     feature_df = LeakageValidator.validate_player_on_pitch(feature_df)
 
     # Separate features and target
-    target_col = 'scored_after'
-    group_col = 'fixture_id'
+    target_col = "scored_after"
+    group_col = "fixture_id"
 
     exclude_cols = [
-        'player_appearance_id', 'player_id', 'fixture_id',
-        'date', 'checkpoint', 'checkpoint_period',
-        'formation', 'jersey_number', target_col,
-        'minute_in', 'minute_out', 'subbed'
+        "player_appearance_id",
+        "player_id",
+        "fixture_id",
+        "date",
+        "checkpoint",
+        "checkpoint_period",
+        "formation",
+        "jersey_number",
+        target_col,
+        "minute_in",
+        "minute_out",
+        "subbed",
     ]
 
     feature_cols = [col for col in feature_df.columns if col not in exclude_cols]
@@ -93,20 +102,20 @@ def main(args):
     groups = feature_df[group_col].copy()
 
     # Convert to pandas if cuDF
-    if hasattr(X, 'to_pandas'):
+    if hasattr(X, "to_pandas"):
         X = X.to_pandas()
         y = y.to_pandas()
         groups = groups.to_pandas()
 
     # Handle categorical variables
-    categorical_cols = X.select_dtypes(include=['object', 'category']).columns
+    categorical_cols = X.select_dtypes(include=["object", "category"]).columns
     for col in categorical_cols:
-        X[col] = X[col].astype('category').cat.codes
+        X[col] = X[col].astype("category").cat.codes
 
     print(f"\nDataset prepared:")
     print(f"  Samples: {len(X)}")
     print(f"  Features: {len(feature_cols)}")
-    print(f"  Positive class: {y.sum()} ({(y.sum()/len(y))*100:.2f}%)")
+    print(f"  Positive class: {y.sum()} ({(y.sum() / len(y)) * 100:.2f}%)")
     print(f"  Unique matches: {groups.nunique()}")
 
     # 6. Cross-validation
@@ -114,7 +123,7 @@ def main(args):
     print("STEP 5: Cross-Validation")
     print("=" * 80)
 
-    cv = create_cross_validator()
+    cv = create_cross_validator(args.config)
 
     # Baseline model - simple XGBoost
     print("\nTraining baseline XGBoost model...")
@@ -143,14 +152,15 @@ def main(args):
             subsample=0.8,
             colsample_bytree=0.8,
             random_state=config.random_state,
-            eval_metric='logloss',
+            eval_metric="logloss",
             early_stopping_rounds=50,
         )
 
         model.fit(
-            X_train_scaled, y_train,
+            X_train_scaled,
+            y_train,
             eval_set=[(X_val_scaled, y_val)],
-            verbose=False
+            verbose=False,
         )
 
         # Predict
@@ -168,12 +178,14 @@ def main(args):
         fold_f1 = f1_score(y_val, y_pred)
         fold_prauc = average_precision_score(y_val, y_pred_proba)
 
-        fold_scores.append({
-            'fold': fold,
-            'f1': fold_f1,
-            'pr_auc': fold_prauc,
-            'threshold': best_threshold
-        })
+        fold_scores.append(
+            {
+                "fold": fold,
+                "f1": fold_f1,
+                "pr_auc": fold_prauc,
+                "threshold": best_threshold,
+            }
+        )
 
         print(f"  F1 Score: {fold_f1:.4f}")
         print(f"  PR-AUC: {fold_prauc:.4f}")
@@ -202,7 +214,7 @@ def main(args):
     print(f"  PR-AUC: {overall_prauc:.4f}")
     print(f"  Optimal threshold: {best_overall_threshold:.4f}")
 
-    print("\n" + classification_report(y, oof_pred_labels, target_names=['No Goal', 'Goal']))
+    print("\n" + classification_report(y, oof_pred_labels, target_names=["No Goal", "Goal"]))
 
     # 7. Save results
     print("\n" + "=" * 80)
@@ -213,14 +225,16 @@ def main(args):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Save OOF predictions
-    results_df = pd.DataFrame({
-        'player_appearance_id': feature_df['player_appearance_id'],
-        'fixture_id': feature_df['fixture_id'],
-        'checkpoint': feature_df['checkpoint'],
-        'true_label': y,
-        'predicted_proba': oof_predictions,
-        'predicted_label': oof_pred_labels
-    })
+    results_df = pd.DataFrame(
+        {
+            "player_appearance_id": feature_df["player_appearance_id"],
+            "fixture_id": feature_df["fixture_id"],
+            "checkpoint": feature_df["checkpoint"],
+            "true_label": y,
+            "predicted_proba": oof_predictions,
+            "predicted_label": oof_pred_labels,
+        }
+    )
 
     results_path = output_dir / "oof_predictions.csv"
     results_df.to_csv(results_path, index=False)
@@ -238,8 +252,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WEC2026 Football Prediction Pipeline")
-    parser.add_argument('--optimize', action='store_true', help='Run hyperparameter optimization')
-    parser.add_argument('--config', type=str, default='config.yaml', help='Path to config file')
+    parser.add_argument("--optimize", action="store_true", help="Run hyperparameter optimization")
+    parser.add_argument("--config", type=str, default="config.yaml", help="Path to config file")
 
     args = parser.parse_args()
     main(args)

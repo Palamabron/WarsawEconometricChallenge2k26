@@ -42,11 +42,14 @@ class FixtureGroupKFold:
         self.random_state = random_state
         self.stratify = stratify
 
+        # Use stratified grouping only when requested. For non-stratified shuffling,
+        # create shuffled group holdouts manually while preserving fixture isolation.
         if stratify:
-            # Use StratifiedGroupKFold only when stratification is explicitly requested
             self.splitter = StratifiedGroupKFold(
                 n_splits=n_splits, shuffle=shuffle, random_state=random_state if shuffle else None
             )
+        elif shuffle:
+            self.splitter = None
         else:
             # GroupKFold does not natively support shuffle, so when shuffle is requested
             # without stratification, we permute unique groups via random_state before
@@ -80,20 +83,14 @@ class FixtureGroupKFold:
         if isinstance(groups, pd.Series):
             groups = groups.to_numpy()
 
-        # When shuffle=True but stratify=False, permute unique groups with random_state
-        # so that GroupKFold assigns shuffled groups to folds
-        if self.shuffle and not self.stratify:
-            rng = np.random.default_rng(self.random_state)
-            unique_groups = np.unique(groups)
-            shuffled_groups = rng.permutation(unique_groups)
-            # Remap group labels to their shuffled position so GroupKFold splits them in
-            # the permuted order rather than the original sorted order
-            group_map = {g: i for i, g in enumerate(shuffled_groups)}
-            groups = np.array([group_map[g] for g in groups])
-
         # Generate splits
         fold_num = 1
-        for train_idx, val_idx in self.splitter.split(X, y, groups=groups):
+        splits = (
+            self._shuffled_group_splits(groups)
+            if self.splitter is None
+            else self.splitter.split(X, y, groups=groups)
+        )
+        for train_idx, val_idx in splits:
             # Validate split
             train_groups = set(groups[train_idx])
             val_groups = set(groups[val_idx])
@@ -117,6 +114,18 @@ class FixtureGroupKFold:
 
             yield train_idx, val_idx
             fold_num += 1
+
+    def _shuffled_group_splits(self, groups: np.ndarray) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+        """Generate deterministic shuffled group holdouts without stratifying by y."""
+        unique_groups = np.unique(groups)
+        rng = np.random.default_rng(self.random_state)
+        shuffled_groups = rng.permutation(unique_groups)
+        group_folds = np.array_split(shuffled_groups, self.n_splits)
+        all_indices = np.arange(len(groups))
+
+        for val_groups in group_folds:
+            val_mask = np.isin(groups, val_groups)
+            yield all_indices[~val_mask], all_indices[val_mask]
 
     def get_n_splits(self, X=None, y=None, groups=None) -> int:
         """Get number of splits"""

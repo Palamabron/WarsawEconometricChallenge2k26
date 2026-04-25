@@ -167,7 +167,6 @@ class FeatureFactory:
 
             df = calculate_press_resistance_features(
                 events["pressure"],
-                events["pass"],
                 df,
                 positive_outcomes=positive_outcomes,
                 negative_outcomes=negative_outcomes,

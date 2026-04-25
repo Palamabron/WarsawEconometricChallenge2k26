@@ -18,6 +18,7 @@ class CategoricalEncoder:
 
     def __init__(self) -> None:
         self.encoders: dict[str, LabelEncoder] = {}
+        self.mappings: dict[str, dict[str, int]] = {}
         self.fitted: bool = False
 
     def fit(
@@ -43,6 +44,9 @@ class CategoricalEncoder:
                 # Fit on training data only
                 encoder.fit(df[col].astype(str))
                 self.encoders[col] = encoder
+                self.mappings[col] = {
+                    category: code for code, category in enumerate(encoder.classes_)
+                }
 
         self.fitted = True
         return self
@@ -65,14 +69,10 @@ class CategoricalEncoder:
 
         df = df.copy()
 
-        for col, encoder in self.encoders.items():
+        for col in self.encoders:
             if col in df.columns:
-                # Handle unseen categories by mapping to -1
-                df[col] = (
-                    df[col]
-                    .astype(str)
-                    .map(lambda x: encoder.transform([x])[0] if x in encoder.classes_ else -1)
-                )
+                # Handle unseen categories by mapping to -1 without per-row encoder calls.
+                df[col] = df[col].astype(str).map(self.mappings[col]).fillna(-1).astype(int)
 
         return df
 

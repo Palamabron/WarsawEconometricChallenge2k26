@@ -71,11 +71,9 @@ class DataIngestion:
             "checkpoint_period": "category",
             "checkpoint_min": "int16",
             "position": "category",
-            "is_home": "bool",
             "formation": "category",
             "minute_in": "int16",
             "minute_out": "int16",
-            "subbed": "bool",
             "jersey_number": "int16",
             "scored_after": "int8",
         }
@@ -132,7 +130,6 @@ class DataIngestion:
             "period": "category",
             "player_appearance_id": "int32",
             "addressee_player_appearance_id": "float32",  # Can be NULL
-            "accurate": "bool",
             "minute": "int16",
             "stage": "category",
         }
@@ -200,7 +197,6 @@ class DataIngestion:
             "minute": "int16",
             "possession": "int32",
             "stage": "category",
-            "under_pressure": "bool",
         }
 
         df = df_lib.read_csv(
@@ -233,7 +229,6 @@ class DataIngestion:
             "period": "category",
             "player_appearance_id": "int32",
             "addressee_player_appearance_id": "float32",  # Can be NULL
-            "accurate": "bool",
             "pressing_player_appearance_id": "int32",
             "press_induced_outcome": "category",
             "pass_angle": "float32",  # Can be NULL

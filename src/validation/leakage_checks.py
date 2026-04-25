@@ -26,20 +26,20 @@ class LeakageValidator:
     def validate_temporal_boundaries(
         engineered_df: Union[pd.DataFrame, "cudf.DataFrame"],
         checkpoint_df: Union[pd.DataFrame, "cudf.DataFrame"],
-        event_dfs: dict[str, Union[pd.DataFrame, "cudf.DataFrame"]],
+        event_dfs: dict[str, Union[pd.DataFrame, "cudf.DataFrame"]] | None = None,
     ) -> bool:
         """
         Validate no future data leakage in features
 
         Checks:
-        1. All event minutes <= checkpoint minutes
-        2. No shot outcomes in features
-        3. Player substitution boundaries respected
+        1. No shot outcomes in features
+        2. Player substitution boundaries respected
+        3. Optional raw event schemas contain time columns needed by temporal features
 
         Args:
             engineered_df: DataFrame with engineered features
             checkpoint_df: Original checkpoint data
-            event_dfs: Event DataFrames
+            event_dfs: Optional event DataFrames to schema-check for temporal columns
 
         Returns:
             True if validation passes
@@ -72,29 +72,45 @@ class LeakageValidator:
                 f"These should be excluded from training."
             )
 
-        # Check 2: Event minutes <= max checkpoint minute for that player
-        print("  ✓ Checking event temporal boundaries...")
-        max_checkpoint_per_player = checkpoint_pd.groupby("player_appearance_id")[
-            "checkpoint_min"
-        ].max()
-        for event_name, event_df in event_dfs.items():
-            if CUDF_AVAILABLE and isinstance(event_df, cudf.DataFrame):
-                event_pd = event_df.to_pandas()
-            else:
-                event_pd = event_df
-            if "minute" not in event_pd.columns or "player_appearance_id" not in event_pd.columns:
-                continue
-            merged_check = event_pd.merge(
-                max_checkpoint_per_player.rename("max_checkpoint"),
-                on="player_appearance_id",
-                how="inner",
-            )
-            future_events = merged_check[merged_check["minute"] > merged_check["max_checkpoint"]]
-            if len(future_events) > 0:
-                warnings.warn(
-                    f"Event dataset '{event_name}': found {len(future_events)} events "
-                    f"occurring after the player's last checkpoint minute."
+        if event_dfs:
+            # Check 2: Raw event schemas expose time boundaries for downstream feature builders
+            print("  ✓ Checking raw event time schemas...")
+            missing_time_cols = [
+                name
+                for name, event_df in event_dfs.items()
+                if "minute" not in event_df.columns or "period" not in event_df.columns
+            ]
+            if missing_time_cols:
+                raise ValueError(
+                    "Event DataFrames missing required temporal columns: "
+                    f"{missing_time_cols}. Expected both 'period' and 'minute'."
                 )
+
+            # Check 3: Event minutes <= max checkpoint minute for that player
+            print("  ✓ Checking event temporal boundaries...")
+            max_checkpoint_per_player = checkpoint_pd.groupby("player_appearance_id")[
+                "checkpoint_min"
+            ].max()
+            for event_name, event_df in event_dfs.items():
+                if CUDF_AVAILABLE and isinstance(event_df, cudf.DataFrame):
+                    event_pd = event_df.to_pandas()
+                else:
+                    event_pd = event_df
+                if "player_appearance_id" not in event_pd.columns:
+                    continue
+                merged_check = event_pd.merge(
+                    max_checkpoint_per_player.rename("max_checkpoint"),
+                    on="player_appearance_id",
+                    how="inner",
+                )
+                future_events = merged_check[
+                    merged_check["minute"] > merged_check["max_checkpoint"]
+                ]
+                if len(future_events) > 0:
+                    warnings.warn(
+                        f"Event dataset '{event_name}': found {len(future_events)} events "
+                        f"occurring after the player's last checkpoint minute."
+                    )
 
         # Check 4: No forbidden columns
         print("  ✓ Checking for forbidden columns...")
@@ -109,7 +125,7 @@ class LeakageValidator:
         if forbidden_cols:
             raise ValueError(f"Forbidden columns detected (potential leakage): {forbidden_cols}")
 
-        # Check 5: Feature value ranges
+        # Check 4: Feature value ranges
         print("  ✓ Checking feature value ranges...")
         numeric_cols = engineered_pd.select_dtypes(include=[np.number]).columns
 
@@ -236,9 +252,8 @@ def safe_temporal_merge(
 
     # Filter to past events only while preserving unmatched left rows
     if event_time_col in merged.columns:
-        valid_mask = (
-            merged[event_time_col].isna()
-            | (merged[event_time_col] <= merged[checkpoint_col])
+        valid_mask = merged[event_time_col].isna() | (
+            merged[event_time_col] <= merged[checkpoint_col]
         )
         merged = merged[valid_mask]
 

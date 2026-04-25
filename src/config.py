@@ -97,12 +97,15 @@ class Config:
 
 
 # Global config instance
-_config = None
+_config: Config | None = None
+_config_path: Path | None = None
 
 
 def get_config(config_path: str = "config.yaml") -> Config:
     """Get or create global config instance"""
-    global _config
-    if _config is None:
+    global _config, _config_path
+    requested_path = Path(config_path).expanduser().resolve()
+    if _config is None or _config_path != requested_path:
         _config = Config(config_path)
+        _config_path = requested_path
     return _config

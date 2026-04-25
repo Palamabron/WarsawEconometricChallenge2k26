@@ -20,7 +20,6 @@ except ImportError:
 
 def calculate_press_resistance_features(
     pressure_df: Union[pd.DataFrame, "cudf.DataFrame"],
-    pass_df: Union[pd.DataFrame, "cudf.DataFrame"],
     checkpoint_df: Union[pd.DataFrame, "cudf.DataFrame"],
     positive_outcomes: list[str] | None = None,
     negative_outcomes: list[str] | None = None,
@@ -39,7 +38,6 @@ def calculate_press_resistance_features(
 
     Args:
         pressure_df: Behavior under pressure events
-        pass_df: Regular pass events (for baseline calculations)
         checkpoint_df: Checkpoint observations
         positive_outcomes: List of positive press outcomes
         negative_outcomes: List of negative press outcomes
@@ -60,11 +58,9 @@ def calculate_press_resistance_features(
     # Convert to pandas for complex operations
     if use_gpu and CUDF_AVAILABLE:
         pressure_pd = pressure_df.to_pandas()
-        pass_pd = pass_df.to_pandas()
         checkpoint_pd = checkpoint_df.to_pandas()
     else:
         pressure_pd = pressure_df.copy()
-        pass_pd = pass_df.copy()
         checkpoint_pd = checkpoint_df.copy()
 
     # Compute baseline rates from the provided data only if not supplied by caller.

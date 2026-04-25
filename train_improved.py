@@ -110,7 +110,7 @@ def main():
     print(f"\nDataset prepared:")
     print(f"  Samples: {len(X)}")
     print(f"  Features: {len(feature_cols)}")
-    print(f"  Positive class: {y.sum()} ({(y.sum()/len(y))*100:.2f}%)")
+    print(f"  Positive class: {y.sum()} ({(y.sum() / len(y)) * 100:.2f}%)")
     print(f"  Unique matches: {groups.nunique()}")
 
     # 6. Cross-validation with focal loss
@@ -199,9 +199,7 @@ def main():
 
     scores_df = pd.DataFrame(fold_scores)
     print(f"\nMean F1 Score: {scores_df['f1'].mean():.4f} (+/- {scores_df['f1'].std():.4f})")
-    print(
-        f"Mean PR-AUC: {scores_df['pr_auc'].mean():.4f} (+/- {scores_df['pr_auc'].std():.4f})"
-    )
+    print(f"Mean PR-AUC: {scores_df['pr_auc'].mean():.4f} (+/- {scores_df['pr_auc'].std():.4f})")
 
     # Find optimal overall threshold
     precision, recall, thresholds = precision_recall_curve(y, oof_predictions)
