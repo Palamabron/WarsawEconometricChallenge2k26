@@ -5,13 +5,14 @@ Automated checks to ensure temporal integrity and prevent future data leakage.
 """
 
 import warnings
-from typing import Union, Dict
+from typing import Union
 
 import numpy as np
 import pandas as pd
 
 try:
     import cudf
+
     CUDF_AVAILABLE = True
 except ImportError:
     CUDF_AVAILABLE = False
@@ -23,9 +24,9 @@ class LeakageValidator:
 
     @staticmethod
     def validate_temporal_boundaries(
-        engineered_df: Union[pd.DataFrame, 'cudf.DataFrame'],
-        checkpoint_df: Union[pd.DataFrame, 'cudf.DataFrame'],
-        event_dfs: Dict[str, Union[pd.DataFrame, 'cudf.DataFrame']]
+        engineered_df: Union[pd.DataFrame, "cudf.DataFrame"],
+        checkpoint_df: Union[pd.DataFrame, "cudf.DataFrame"],
+        event_dfs: dict[str, Union[pd.DataFrame, "cudf.DataFrame"]],
     ) -> bool:
         """
         Validate no future data leakage in features
@@ -59,8 +60,10 @@ class LeakageValidator:
         # Check 1: Substitution boundaries
         print("  ✓ Checking substitution boundaries...")
         invalid_subs = checkpoint_pd[
-            ~((checkpoint_pd['minute_in'] <= checkpoint_pd['checkpoint_min']) &
-              (checkpoint_pd['checkpoint_min'] <= checkpoint_pd['minute_out']))
+            ~(
+                (checkpoint_pd["minute_in"] <= checkpoint_pd["checkpoint_min"])
+                & (checkpoint_pd["checkpoint_min"] <= checkpoint_pd["minute_out"])
+            )
         ]
 
         if len(invalid_subs) > 0:
@@ -71,11 +74,12 @@ class LeakageValidator:
 
         # Check 2: No forbidden columns
         print("  ✓ Checking for forbidden columns...")
-        forbidden_keywords = ['outcome', 'result', 'goal_scored', 'goal_conceded']
+        forbidden_keywords = ["outcome", "result", "goal_scored", "goal_conceded"]
         forbidden_cols = [
-            col for col in engineered_pd.columns
+            col
+            for col in engineered_pd.columns
             if any(keyword in col.lower() for keyword in forbidden_keywords)
-            and col != 'scored_after'  # Target is allowed
+            and col != "scored_after"  # Target is allowed
         ]
 
         if forbidden_cols:
@@ -100,11 +104,11 @@ class LeakageValidator:
 
     @staticmethod
     def validate_cv_splits(
-        X: Union[pd.DataFrame, np.ndarray],
-        y: Union[pd.Series, np.ndarray],
-        groups: Union[pd.Series, np.ndarray],
+        X: pd.DataFrame | np.ndarray,
+        y: pd.Series | np.ndarray,
+        groups: pd.Series | np.ndarray,
         train_idx: np.ndarray,
-        val_idx: np.ndarray
+        val_idx: np.ndarray,
     ) -> bool:
         """
         Validate cross-validation split integrity
@@ -128,7 +132,7 @@ class LeakageValidator:
         """
         # Get groups for train and validation
         if isinstance(groups, pd.Series):
-            groups = groups.values
+            groups = groups.to_numpy()
 
         train_groups = set(groups[train_idx])
         val_groups = set(groups[val_idx])
@@ -146,8 +150,8 @@ class LeakageValidator:
 
     @staticmethod
     def validate_player_on_pitch(
-        df: Union[pd.DataFrame, 'cudf.DataFrame']
-    ) -> Union[pd.DataFrame, 'cudf.DataFrame']:
+        df: Union[pd.DataFrame, "cudf.DataFrame"],
+    ) -> Union[pd.DataFrame, "cudf.DataFrame"]:
         """
         Filter out observations where player is not on pitch
 
@@ -165,9 +169,8 @@ class LeakageValidator:
         original_len = len(df_pd)
 
         # Keep only valid observations
-        valid_mask = (
-            (df_pd['minute_in'] <= df_pd['checkpoint_min']) &
-            (df_pd['checkpoint_min'] <= df_pd['minute_out'])
+        valid_mask = (df_pd["minute_in"] <= df_pd["checkpoint_min"]) & (
+            df_pd["checkpoint_min"] <= df_pd["minute_out"]
         )
 
         df_filtered = df_pd[valid_mask].copy()
@@ -186,8 +189,8 @@ def safe_temporal_merge(
     left_df: pd.DataFrame,
     right_df: pd.DataFrame,
     on: list,
-    checkpoint_col: str = 'checkpoint_min',
-    event_time_col: str = 'minute'
+    checkpoint_col: str = "checkpoint_min",
+    event_time_col: str = "minute",
 ) -> pd.DataFrame:
     """
     Safely merge event data to checkpoint data with temporal filtering
@@ -205,7 +208,7 @@ def safe_temporal_merge(
         Merged DataFrame with temporal integrity
     """
     # Merge
-    merged = left_df.merge(right_df, on=on, how='left', suffixes=('', '_event'))
+    merged = left_df.merge(right_df, on=on, how="left", suffixes=("", "_event"))
 
     # Filter to past events only
     if event_time_col in merged.columns:
@@ -216,10 +219,8 @@ def safe_temporal_merge(
 
 
 def check_feature_leakage_correlation(
-    X: pd.DataFrame,
-    y: pd.Series,
-    threshold: float = 0.95
-) -> Dict[str, float]:
+    X: pd.DataFrame, y: pd.Series, threshold: float = 0.95
+) -> dict[str, float]:
     """
     Check for suspiciously high feature-target correlations
 

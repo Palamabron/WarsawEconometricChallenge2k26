@@ -2,14 +2,14 @@
 Tests for temporal integrity and data leakage prevention
 """
 
-import pytest
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.validation.leakage_checks import (
     LeakageValidator,
+    check_feature_leakage_correlation,
     safe_temporal_merge,
-    check_feature_leakage_correlation
 )
 
 
@@ -17,50 +17,56 @@ def test_temporal_boundary_validation():
     """Test that events after checkpoint are flagged"""
 
     # Create mock checkpoint data
-    checkpoint_df = pd.DataFrame({
-        'player_appearance_id': [1, 1, 2],
-        'checkpoint_min': [15, 30, 15],
-        'minute_in': [1, 1, 1],
-        'minute_out': [90, 90, 90],
-        'scored_after': [0, 1, 0]
-    })
+    checkpoint_df = pd.DataFrame(
+        {
+            "player_appearance_id": [1, 1, 2],
+            "checkpoint_min": [15, 30, 15],
+            "minute_in": [1, 1, 1],
+            "minute_out": [90, 90, 90],
+            "scored_after": [0, 1, 0],
+        }
+    )
 
     # Create mock event data (some events after checkpoint)
-    event_df = pd.DataFrame({
-        'player_appearance_id': [1, 1, 1, 2, 2],
-        'minute': [10, 20, 35, 12, 18],  # 35 is after checkpoint 30, 18 after 15
-        'value': [1, 2, 3, 4, 5]
-    })
+    event_df = pd.DataFrame(
+        {
+            "player_appearance_id": [1, 1, 1, 2, 2],
+            "minute": [10, 20, 35, 12, 18],  # 35 is after checkpoint 30, 18 after 15
+            "value": [1, 2, 3, 4, 5],
+        }
+    )
 
     # Valid merge should exclude future events
     merged = safe_temporal_merge(
         checkpoint_df,
         event_df,
-        on=['player_appearance_id'],
-        checkpoint_col='checkpoint_min',
-        event_time_col='minute'
+        on=["player_appearance_id"],
+        checkpoint_col="checkpoint_min",
+        event_time_col="minute",
     )
 
     # Check no events after checkpoint
-    assert (merged['minute'] <= merged['checkpoint_min']).all()
+    assert (merged["minute"] <= merged["checkpoint_min"]).all()
 
 
 def test_player_on_pitch_validation():
     """Test substitution boundary enforcement"""
 
-    df = pd.DataFrame({
-        'player_appearance_id': [1, 2, 3],
-        'checkpoint_min': [15, 50, 80],
-        'minute_in': [1, 46, 1],  # Player 2 comes in at 46
-        'minute_out': [90, 90, 70],  # Player 3 leaves at 70
-        'scored_after': [0, 1, 0]
-    })
+    df = pd.DataFrame(
+        {
+            "player_appearance_id": [1, 2, 3],
+            "checkpoint_min": [15, 50, 80],
+            "minute_in": [1, 46, 1],  # Player 2 comes in at 46
+            "minute_out": [90, 90, 70],  # Player 3 leaves at 70
+            "scored_after": [0, 1, 0],
+        }
+    )
 
     filtered = LeakageValidator.validate_player_on_pitch(df)
 
     # Player 3's checkpoint at 80 should be removed (out at 70)
     assert len(filtered) == 2
-    assert 3 not in filtered['player_appearance_id'].values
+    assert 3 not in filtered["player_appearance_id"].values
 
 
 def test_cv_split_validation():
@@ -89,21 +95,23 @@ def test_feature_leakage_correlation():
     """Test detection of suspiciously high correlations"""
 
     n = 1000
-    X = pd.DataFrame({
-        'normal_feature': np.random.randn(n),
-        'suspicious_feature': np.random.randn(n),
-    })
+    X = pd.DataFrame(
+        {
+            "normal_feature": np.random.randn(n),
+            "suspicious_feature": np.random.randn(n),
+        }
+    )
 
     y = np.random.randint(0, 2, n)
 
     # Make suspicious feature highly correlated with target
-    X['suspicious_feature'] = y + np.random.randn(n) * 0.1
+    X["suspicious_feature"] = y + np.random.randn(n) * 0.1
 
     suspicious = check_feature_leakage_correlation(X, pd.Series(y), threshold=0.9)
 
     # Should flag the suspicious feature
-    assert 'suspicious_feature' in suspicious
-    assert abs(suspicious['suspicious_feature']) > 0.9
+    assert "suspicious_feature" in suspicious
+    assert abs(suspicious["suspicious_feature"]) > 0.9
 
 
 if __name__ == "__main__":

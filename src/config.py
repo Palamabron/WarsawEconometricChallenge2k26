@@ -1,9 +1,10 @@
 """Configuration loader with environment detection"""
 
 import os
-import yaml
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
+
+import yaml
 
 
 class Config:
@@ -15,12 +16,12 @@ class Config:
         self.use_gpu = self._detect_gpu()
         self.project_root = Path(__file__).parent.parent
 
-    def _load_config(self) -> Dict[str, Any]:
+    def _load_config(self) -> dict[str, Any]:
         """Load configuration from YAML file"""
         if not self.config_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
 
-        with open(self.config_path, 'r') as f:
+        with open(self.config_path) as f:
             return yaml.safe_load(f)
 
     def _detect_gpu(self) -> bool:
@@ -31,19 +32,21 @@ class Config:
             bool: True if GPU available, False otherwise
         """
         # Check environment variable
-        cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
-        if cuda_visible == '' or cuda_visible == '-1':
+        cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if cuda_visible == "" or cuda_visible == "-1":
             return False
 
         # Try importing CUDA libraries
         try:
             import cudf
+
             return True
         except ImportError:
             pass
 
         try:
             import torch
+
             if torch.cuda.is_available():
                 return True
         except ImportError:
@@ -53,7 +56,7 @@ class Config:
 
     def get(self, key: str, default=None):
         """Get configuration value by key (supports nested keys with dots)"""
-        keys = key.split('.')
+        keys = key.split(".")
         value = self.config
         for k in keys:
             if isinstance(value, dict):
@@ -64,12 +67,12 @@ class Config:
 
     def get_data_path(self, filename: str) -> Path:
         """Get full path to data file"""
-        data_dir = self.get('data.data_dir', 'data')
+        data_dir = self.get("data.data_dir", "data")
         return self.project_root / data_dir / filename
 
     def get_output_path(self, output_type: str, filename: str) -> Path:
         """Get full path to output file (models/predictions/reports)"""
-        output_dir = self.get(f'outputs.{output_type}_dir', f'outputs/{output_type}')
+        output_dir = self.get(f"outputs.{output_type}_dir", f"outputs/{output_type}")
         path = self.project_root / output_dir
         path.mkdir(parents=True, exist_ok=True)
         return path / filename
@@ -77,17 +80,17 @@ class Config:
     @property
     def n_folds(self) -> int:
         """Number of cross-validation folds"""
-        return self.get('cross_validation.n_folds', 5)
+        return self.get("cross_validation.n_folds", 5)
 
     @property
     def random_state(self) -> int:
         """Random seed for reproducibility"""
-        return self.get('random_seed', 42)
+        return self.get("random_seed", 42)
 
     @property
     def group_by_column(self) -> str:
         """Column name for GroupKFold (fixture_id)"""
-        return self.get('cross_validation.group_by', 'fixture_id')
+        return self.get("cross_validation.group_by", "fixture_id")
 
     def __repr__(self) -> str:
         return f"Config(gpu={self.use_gpu}, config_path='{self.config_path}')"

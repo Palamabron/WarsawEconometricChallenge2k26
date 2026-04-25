@@ -4,9 +4,10 @@ Cross-Validation Strategy with Group-based splitting
 Implements fixture-level GroupKFold to prevent match-level data leakage.
 """
 
+from collections.abc import Iterator
+
 import numpy as np
 import pandas as pd
-from typing import Iterator, Tuple, Union
 from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
 
 from src.config import get_config
@@ -25,7 +26,7 @@ class FixtureGroupKFold:
         n_splits: int = 5,
         shuffle: bool = True,
         random_state: int = 42,
-        stratify: bool = False
+        stratify: bool = False,
     ):
         """
         Initialize fixture-grouped cross-validator
@@ -46,19 +47,17 @@ class FixtureGroupKFold:
         # when stratification is explicitly requested.
         if stratify or shuffle:
             self.splitter = StratifiedGroupKFold(
-                n_splits=n_splits,
-                shuffle=shuffle,
-                random_state=random_state
+                n_splits=n_splits, shuffle=shuffle, random_state=random_state
             )
         else:
             self.splitter = GroupKFold(n_splits=n_splits)
 
     def split(
         self,
-        X: Union[pd.DataFrame, np.ndarray],
-        y: Union[pd.Series, np.ndarray],
-        groups: Union[pd.Series, np.ndarray]
-    ) -> Iterator[Tuple[np.ndarray, np.ndarray]]:
+        X: pd.DataFrame | np.ndarray,
+        y: pd.Series | np.ndarray,
+        groups: pd.Series | np.ndarray,
+    ) -> Iterator[tuple[np.ndarray, np.ndarray]]:
         """
         Generate train/validation indices
 
@@ -71,14 +70,14 @@ class FixtureGroupKFold:
             Tuple of (train_indices, validation_indices)
         """
         print(f"\nGenerating {self.n_splits}-fold cross-validation splits...")
-        print(f"Grouping by: fixture_id")
+        print("Grouping by: fixture_id")
         print(f"Stratified: {self.stratify}")
 
         # Convert to numpy arrays if needed
         if isinstance(y, pd.Series):
-            y = y.values
+            y = y.to_numpy()
         if isinstance(groups, pd.Series):
-            groups = groups.values
+            groups = groups.to_numpy()
 
         # Generate splits
         fold_num = 1
@@ -89,9 +88,7 @@ class FixtureGroupKFold:
 
             overlap = train_groups.intersection(val_groups)
             if overlap:
-                raise ValueError(
-                    f"Fold {fold_num}: Group overlap detected! {overlap}"
-                )
+                raise ValueError(f"Fold {fold_num}: Group overlap detected! {overlap}")
 
             # Calculate class distribution
             train_pos = y[train_idx].sum()
@@ -100,7 +97,9 @@ class FixtureGroupKFold:
             val_pct = (val_pos / len(val_idx)) * 100
 
             print(f"\nFold {fold_num}:")
-            print(f"  Train: {len(train_idx):4d} samples, {train_pos:3d} positive ({train_pct:.2f}%)")
+            print(
+                f"  Train: {len(train_idx):4d} samples, {train_pos:3d} positive ({train_pct:.2f}%)"
+            )
             print(f"  Val:   {len(val_idx):4d} samples, {val_pos:3d} positive ({val_pct:.2f}%)")
             print(f"  Train matches: {len(train_groups)}, Val matches: {len(val_groups)}")
 
@@ -128,16 +127,12 @@ def create_cross_validator(config_path: str = "config.yaml") -> FixtureGroupKFol
         n_splits=config.n_folds,
         shuffle=True,
         random_state=config.random_state,
-        stratify=config.get('cross_validation.stratify', False)
+        stratify=config.get("cross_validation.stratify", False),
     )
 
 
 def get_oof_predictions(
-    model,
-    X: pd.DataFrame,
-    y: pd.Series,
-    groups: pd.Series,
-    cv: FixtureGroupKFold
+    model, X: pd.DataFrame, y: pd.Series, groups: pd.Series, cv: FixtureGroupKFold
 ) -> np.ndarray:
     """
     Generate out-of-fold predictions for stacking

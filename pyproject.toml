@@ -2,7 +2,7 @@
 name = "wec2026-football-prediction"
 version = "0.1.0"
 description = "Football goal-scoring prediction pipeline for Warsaw Econometric Challenge 2026"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24.0",
@@ -46,7 +46,7 @@ addopts = "-v --cov=src --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -71,7 +71,7 @@ ignore = [
 "tests/*" = ["S101"]      # Allow assert in tests
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false  # Gradually enable

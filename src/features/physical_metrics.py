@@ -5,12 +5,14 @@ Calculates relative intensity, fatigue indicators, and positional deviations
 from physical tracking data (runs, sprints, speed).
 """
 
+from typing import Union
+
 import numpy as np
 import pandas as pd
-from typing import Union, Dict
 
 try:
     import cudf
+
     CUDF_AVAILABLE = True
 except ImportError:
     CUDF_AVAILABLE = False
@@ -18,10 +20,10 @@ except ImportError:
 
 
 def calculate_physical_features(
-    run_df: Union[pd.DataFrame, 'cudf.DataFrame'],
-    checkpoint_df: Union[pd.DataFrame, 'cudf.DataFrame'],
-    use_gpu: bool = False
-) -> Union[pd.DataFrame, 'cudf.DataFrame']:
+    run_df: Union[pd.DataFrame, "cudf.DataFrame"],
+    checkpoint_df: Union[pd.DataFrame, "cudf.DataFrame"],
+    use_gpu: bool = False,
+) -> Union[pd.DataFrame, "cudf.DataFrame"]:
     """
     Calculate physical performance features per checkpoint
 
@@ -48,12 +50,12 @@ def calculate_physical_features(
         checkpoint_pd = checkpoint_df.copy()
 
     # Initialize feature columns
-    checkpoint_pd['workload_ratio_hsr'] = 1.0  # Default to balanced
-    checkpoint_pd['workload_ratio_sprints'] = 1.0
-    checkpoint_pd['speed_decay'] = 1.0  # Default to no decay
-    checkpoint_pd['positional_sprint_deviation'] = 0.0
-    checkpoint_pd['positional_hsr_deviation'] = 0.0
-    checkpoint_pd['run_type_diversity'] = 0.0
+    checkpoint_pd["workload_ratio_hsr"] = 1.0  # Default to balanced
+    checkpoint_pd["workload_ratio_sprints"] = 1.0
+    checkpoint_pd["speed_decay"] = 1.0  # Default to no decay
+    checkpoint_pd["positional_sprint_deviation"] = 0.0
+    checkpoint_pd["positional_hsr_deviation"] = 0.0
+    checkpoint_pd["run_type_diversity"] = 0.0
 
     # Calculate positional averages
     position_averages = _calculate_positional_averages(checkpoint_pd)
@@ -62,34 +64,34 @@ def calculate_physical_features(
     for idx, row in checkpoint_pd.iterrows():
         # 1. Intra-Match Workload Ratio
         workload_features = _calculate_workload_ratio(row)
-        checkpoint_pd.loc[idx, 'workload_ratio_hsr'] = workload_features['hsr_ratio']
-        checkpoint_pd.loc[idx, 'workload_ratio_sprints'] = workload_features['sprint_ratio']
+        checkpoint_pd.loc[idx, "workload_ratio_hsr"] = workload_features["hsr_ratio"]
+        checkpoint_pd.loc[idx, "workload_ratio_sprints"] = workload_features["sprint_ratio"]
 
         # 2. Speed Decay
         speed_decay = _calculate_speed_decay(row)
-        checkpoint_pd.loc[idx, 'speed_decay'] = speed_decay
+        checkpoint_pd.loc[idx, "speed_decay"] = speed_decay
 
         # 3. Positional Deviations
-        position = row['position']
+        position = row["position"]
         if position in position_averages:
             pos_avg = position_averages[position]
 
-            sprint_deviation = row['last15_sprints'] - pos_avg['avg_sprints']
-            hsr_deviation = row['last15_hsr'] - pos_avg['avg_hsr']
+            sprint_deviation = row["last15_sprints"] - pos_avg["avg_sprints"]
+            hsr_deviation = row["last15_hsr"] - pos_avg["avg_hsr"]
 
-            checkpoint_pd.loc[idx, 'positional_sprint_deviation'] = sprint_deviation
-            checkpoint_pd.loc[idx, 'positional_hsr_deviation'] = hsr_deviation
+            checkpoint_pd.loc[idx, "positional_sprint_deviation"] = sprint_deviation
+            checkpoint_pd.loc[idx, "positional_hsr_deviation"] = hsr_deviation
 
     # 4. Run Type Diversity (from run events)
-    if 'run_type' in run_pd.columns:
+    if "run_type" in run_pd.columns:
         diversity_features = _calculate_run_diversity(run_pd, checkpoint_pd)
         # Drop the initialized column before merging to avoid _x/_y suffix conflicts
-        checkpoint_pd = checkpoint_pd.drop(columns=['run_type_diversity']).merge(
+        checkpoint_pd = checkpoint_pd.drop(columns=["run_type_diversity"]).merge(
             diversity_features,
-            on=['player_appearance_id', 'checkpoint_period', 'checkpoint_min'],
-            how='left'
+            on=["player_appearance_id", "checkpoint_period", "checkpoint_min"],
+            how="left",
         )
-        checkpoint_pd['run_type_diversity'] = checkpoint_pd['run_type_diversity'].fillna(0)
+        checkpoint_pd["run_type_diversity"] = checkpoint_pd["run_type_diversity"].fillna(0)
 
     # Convert back to cuDF if needed
     if use_gpu and CUDF_AVAILABLE:
@@ -98,7 +100,7 @@ def calculate_physical_features(
     return checkpoint_pd
 
 
-def _calculate_workload_ratio(row: pd.Series) -> Dict[str, float]:
+def _calculate_workload_ratio(row: pd.Series) -> dict[str, float]:
     """
     Calculate acute:chronic workload ratio
 
@@ -111,22 +113,22 @@ def _calculate_workload_ratio(row: pd.Series) -> Dict[str, float]:
     Returns:
         Dictionary with HSR and sprint ratios
     """
-    checkpoint_min = row['checkpoint_min']
+    checkpoint_min = row["checkpoint_min"]
 
     # Avoid division by zero for early checkpoints
     if checkpoint_min < 15:
-        return {'hsr_ratio': 1.0, 'sprint_ratio': 1.0}
+        return {"hsr_ratio": 1.0, "sprint_ratio": 1.0}
 
     # Calculate number of 15-minute periods elapsed
     n_periods = checkpoint_min / 15.0
 
     # Chronic workload = cumulative / number of periods
-    chronic_hsr = row['cumul_hsr'] / n_periods if n_periods > 0 else row['last15_hsr']
-    chronic_sprints = row['cumul_sprints'] / n_periods if n_periods > 0 else row['last15_sprints']
+    chronic_hsr = row["cumul_hsr"] / n_periods if n_periods > 0 else row["last15_hsr"]
+    chronic_sprints = row["cumul_sprints"] / n_periods if n_periods > 0 else row["last15_sprints"]
 
     # Acute workload = last 15 minutes
-    acute_hsr = row['last15_hsr']
-    acute_sprints = row['last15_sprints']
+    acute_hsr = row["last15_hsr"]
+    acute_sprints = row["last15_sprints"]
 
     # Calculate ratios (avoid division by zero)
     hsr_ratio = acute_hsr / chronic_hsr if chronic_hsr > 0 else 1.0
@@ -136,10 +138,7 @@ def _calculate_workload_ratio(row: pd.Series) -> Dict[str, float]:
     hsr_ratio = np.clip(hsr_ratio, 0.0, 3.0)
     sprint_ratio = np.clip(sprint_ratio, 0.0, 3.0)
 
-    return {
-        'hsr_ratio': hsr_ratio,
-        'sprint_ratio': sprint_ratio
-    }
+    return {"hsr_ratio": hsr_ratio, "sprint_ratio": sprint_ratio}
 
 
 def _calculate_speed_decay(row: pd.Series) -> float:
@@ -156,8 +155,8 @@ def _calculate_speed_decay(row: pd.Series) -> float:
     Returns:
         Speed decay ratio
     """
-    cumul_peak = row['cumul_peak_speed']
-    last15_peak = row['last15_peak_speed']
+    cumul_peak = row["cumul_peak_speed"]
+    last15_peak = row["last15_peak_speed"]
 
     if cumul_peak == 0:
         return 1.0
@@ -171,7 +170,7 @@ def _calculate_speed_decay(row: pd.Series) -> float:
     return decay
 
 
-def _calculate_positional_averages(checkpoint_df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+def _calculate_positional_averages(checkpoint_df: pd.DataFrame) -> dict[str, dict[str, float]]:
     """
     Calculate average physical metrics by position
 
@@ -183,22 +182,19 @@ def _calculate_positional_averages(checkpoint_df: pd.DataFrame) -> Dict[str, Dic
     """
     position_averages = {}
 
-    for position in checkpoint_df['position'].unique():
-        pos_data = checkpoint_df[checkpoint_df['position'] == position]
+    for position in checkpoint_df["position"].unique():
+        pos_data = checkpoint_df[checkpoint_df["position"] == position]
 
         position_averages[position] = {
-            'avg_sprints': pos_data['last15_sprints'].mean(),
-            'avg_hsr': pos_data['last15_hsr'].mean(),
-            'avg_distance': pos_data['last15_distance'].mean(),
+            "avg_sprints": pos_data["last15_sprints"].mean(),
+            "avg_hsr": pos_data["last15_hsr"].mean(),
+            "avg_distance": pos_data["last15_distance"].mean(),
         }
 
     return position_averages
 
 
-def _calculate_run_diversity(
-    run_df: pd.DataFrame,
-    checkpoint_df: pd.DataFrame
-) -> pd.DataFrame:
+def _calculate_run_diversity(run_df: pd.DataFrame, checkpoint_df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate diversity of run types per checkpoint
 
@@ -214,17 +210,17 @@ def _calculate_run_diversity(
     diversity_results = []
 
     for idx, row in checkpoint_df.iterrows():
-        player_id = row['player_appearance_id']
-        checkpoint_min = row['checkpoint_min']
-        checkpoint_period = row['checkpoint_period']
-        minute_in = row['minute_in']
+        player_id = row["player_appearance_id"]
+        checkpoint_min = row["checkpoint_min"]
+        checkpoint_period = row["checkpoint_period"]
+        minute_in = row["minute_in"]
 
         # Get runs for this player in rolling 15-min window
         player_runs = run_df[
-            (run_df['player_appearance_id'] == player_id) &
-            (run_df['period'] == checkpoint_period) &
-            (run_df['minute'] > (checkpoint_min - 15)) &
-            (run_df['minute'] <= checkpoint_min)
+            (run_df["player_appearance_id"] == player_id)
+            & (run_df["period"] == checkpoint_period)
+            & (run_df["minute"] > (checkpoint_min - 15))
+            & (run_df["minute"] <= checkpoint_min)
         ]
 
         # Calculate diversity (entropy or unique count)
@@ -232,7 +228,7 @@ def _calculate_run_diversity(
             diversity = 0.0
         else:
             # Count unique run types
-            run_type_counts = player_runs['run_type'].value_counts()
+            run_type_counts = player_runs["run_type"].value_counts()
             n_types = len(run_type_counts)
 
             # Simple diversity metric: number of unique run types
@@ -242,21 +238,23 @@ def _calculate_run_diversity(
             # proportions = run_type_counts / len(player_runs)
             # diversity = -np.sum(proportions * np.log2(proportions + 1e-10))
 
-        diversity_results.append({
-            'player_appearance_id': player_id,
-            'checkpoint_period': checkpoint_period,
-            'checkpoint_min': checkpoint_min,
-            'run_type_diversity': diversity
-        })
+        diversity_results.append(
+            {
+                "player_appearance_id": player_id,
+                "checkpoint_period": checkpoint_period,
+                "checkpoint_min": checkpoint_min,
+                "run_type_diversity": diversity,
+            }
+        )
 
     return pd.DataFrame(diversity_results)
 
 
 def calculate_fatigue_indicators(
-    checkpoint_df: Union[pd.DataFrame, 'cudf.DataFrame'],
+    checkpoint_df: Union[pd.DataFrame, "cudf.DataFrame"],
     fatigue_threshold: float = 0.8,
-    momentum_threshold: float = 1.2
-) -> Union[pd.DataFrame, 'cudf.DataFrame']:
+    momentum_threshold: float = 1.2,
+) -> Union[pd.DataFrame, "cudf.DataFrame"]:
     """
     Create binary fatigue and momentum indicators
 
@@ -276,13 +274,13 @@ def calculate_fatigue_indicators(
         use_cudf = False
 
     # Binary indicators
-    df['is_fatigued'] = (df['workload_ratio_hsr'] < fatigue_threshold).astype(int)
-    df['has_momentum'] = (df['workload_ratio_hsr'] > momentum_threshold).astype(int)
+    df["is_fatigued"] = (df["workload_ratio_hsr"] < fatigue_threshold).astype(int)
+    df["has_momentum"] = (df["workload_ratio_hsr"] > momentum_threshold).astype(int)
 
     # Intensity state (categorical: fatigued, normal, momentum)
-    df['intensity_state'] = 'normal'
-    df.loc[df['is_fatigued'] == 1, 'intensity_state'] = 'fatigued'
-    df.loc[df['has_momentum'] == 1, 'intensity_state'] = 'momentum'
+    df["intensity_state"] = "normal"
+    df.loc[df["is_fatigued"] == 1, "intensity_state"] = "fatigued"
+    df.loc[df["has_momentum"] == 1, "intensity_state"] = "momentum"
 
     if use_cudf:
         return cudf.from_pandas(df)

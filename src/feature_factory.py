@@ -6,18 +6,19 @@ generation with strict temporal integrity enforcement.
 """
 
 import warnings
-from typing import Union, Dict, Optional
+from typing import Union
 
 import numpy as np
 import pandas as pd
 
 from src.config import get_config
 from src.features.expected_threat import ExpectedThreatCalculator, aggregate_xt_features
+from src.features.physical_metrics import calculate_fatigue_indicators, calculate_physical_features
 from src.features.press_resistance import calculate_press_resistance_features
-from src.features.physical_metrics import calculate_physical_features, calculate_fatigue_indicators
 
 try:
     import cudf
+
     CUDF_AVAILABLE = True
 except ImportError:
     CUDF_AVAILABLE = False
@@ -51,10 +52,10 @@ class FeatureFactory:
 
     def engineer_features(
         self,
-        checkpoint_df: Union[pd.DataFrame, 'cudf.DataFrame'],
-        event_dfs: Dict[str, Union[pd.DataFrame, 'cudf.DataFrame']],
-        fold_indices: Optional[np.ndarray] = None
-    ) -> Union[pd.DataFrame, 'cudf.DataFrame']:
+        checkpoint_df: Union[pd.DataFrame, "cudf.DataFrame"],
+        event_dfs: dict[str, Union[pd.DataFrame, "cudf.DataFrame"]],
+        fold_indices: np.ndarray | None = None,
+    ) -> Union[pd.DataFrame, "cudf.DataFrame"]:
         """
         Engineer all features for the dataset
 
@@ -116,66 +117,60 @@ class FeatureFactory:
         return df
 
     def _add_expected_threat_features(
-        self,
-        df: pd.DataFrame,
-        events: Dict[str, pd.DataFrame]
+        self, df: pd.DataFrame, events: dict[str, pd.DataFrame]
     ) -> pd.DataFrame:
         """Add Expected Threat features"""
         try:
             # Initialize and fit xT calculator
             xt_calc = ExpectedThreatCalculator(
-                zones=self.config.get('features.expected_threat.zones', ['bottom', 'middle', 'top']),
-                convergence_threshold=self.config.get('features.expected_threat.convergence_threshold', 0.001),
-                max_iterations=self.config.get('features.expected_threat.max_iterations', 10),
-                use_gpu=False  # Use pandas for now for compatibility
+                zones=self.config.get(
+                    "features.expected_threat.zones", ["bottom", "middle", "top"]
+                ),
+                convergence_threshold=self.config.get(
+                    "features.expected_threat.convergence_threshold", 0.001
+                ),
+                max_iterations=self.config.get("features.expected_threat.max_iterations", 10),
+                use_gpu=False,  # Use pandas for now for compatibility
             )
 
             # Fit on pass and shot data
-            xt_calc.fit(events['pass'], events['shot'])
+            xt_calc.fit(events["pass"], events["shot"])
 
             # Aggregate features per checkpoint
-            df = aggregate_xt_features(
-                events['pass'],
-                df,
-                xt_calc,
-                use_gpu=False
-            )
+            df = aggregate_xt_features(events["pass"], df, xt_calc, use_gpu=False)
 
             print(f"  ✓ Added {4} Expected Threat features")
 
         except Exception as e:
             warnings.warn(f"Failed to compute Expected Threat features: {e}")
             # Add zero columns as fallback
-            df['last15_xt_added'] = 0.0
-            df['cumul_xt_added'] = 0.0
-            df['last15_xt_count'] = 0
-            df['cumul_xt_count'] = 0
+            df["last15_xt_added"] = 0.0
+            df["cumul_xt_added"] = 0.0
+            df["last15_xt_count"] = 0
+            df["cumul_xt_count"] = 0
 
         return df
 
     def _add_press_resistance_features(
-        self,
-        df: pd.DataFrame,
-        events: Dict[str, pd.DataFrame]
+        self, df: pd.DataFrame, events: dict[str, pd.DataFrame]
     ) -> pd.DataFrame:
         """Add Press Resistance features"""
         try:
             positive_outcomes = self.config.get(
-                'features.press_resistance.positive_outcomes',
-                ['forward_pass', 'backward_pass', 'ball_carry']
+                "features.press_resistance.positive_outcomes",
+                ["forward_pass", "backward_pass", "ball_carry"],
             )
             negative_outcomes = self.config.get(
-                'features.press_resistance.negative_outcomes',
-                ['turnover']
+                "features.press_resistance.negative_outcomes", ["turnover"]
             )
 
             df = calculate_press_resistance_features(
-                events['pressure'],
-                events['pass'],
+                events["pressure"],
+                events["pass"],
                 df,
                 positive_outcomes=positive_outcomes,
                 negative_outcomes=negative_outcomes,
-                use_gpu=False
+                use_gpu=False,
             )
 
             print(f"  ✓ Added {10} Press Resistance features")
@@ -183,32 +178,28 @@ class FeatureFactory:
         except Exception as e:
             warnings.warn(f"Failed to compute Press Resistance features: {e}")
             # Add zero columns as fallback
-            for prefix in ['last15', 'cumul']:
-                df[f'{prefix}_press_retention'] = 0.0
-                df[f'{prefix}_progressive_press'] = 0
-                df[f'{prefix}_press_angle_std'] = 0.0
-                df[f'{prefix}_press_quality'] = 0.0
+            for prefix in ["last15", "cumul"]:
+                df[f"{prefix}_press_retention"] = 0.0
+                df[f"{prefix}_progressive_press"] = 0
+                df[f"{prefix}_press_angle_std"] = 0.0
+                df[f"{prefix}_press_quality"] = 0.0
 
         return df
 
     def _add_physical_metrics_features(
-        self,
-        df: pd.DataFrame,
-        events: Dict[str, pd.DataFrame]
+        self, df: pd.DataFrame, events: dict[str, pd.DataFrame]
     ) -> pd.DataFrame:
         """Add Physical Metrics features"""
         try:
-            df = calculate_physical_features(
-                events['run'],
-                df,
-                use_gpu=False
-            )
+            df = calculate_physical_features(events["run"], df, use_gpu=False)
 
             # Add fatigue indicators
             df = calculate_fatigue_indicators(
                 df,
-                fatigue_threshold=self.config.get('features.physical.fatigue_threshold_low', 0.8),
-                momentum_threshold=self.config.get('features.physical.momentum_threshold_high', 1.2)
+                fatigue_threshold=self.config.get("features.physical.fatigue_threshold_low", 0.8),
+                momentum_threshold=self.config.get(
+                    "features.physical.momentum_threshold_high", 1.2
+                ),
             )
 
             print(f"  ✓ Added {9} Physical Metrics features")
@@ -216,52 +207,50 @@ class FeatureFactory:
         except Exception as e:
             warnings.warn(f"Failed to compute Physical Metrics features: {e}")
             # Add zero columns as fallback
-            df['workload_ratio_hsr'] = 1.0
-            df['workload_ratio_sprints'] = 1.0
-            df['speed_decay'] = 1.0
-            df['positional_sprint_deviation'] = 0.0
-            df['positional_hsr_deviation'] = 0.0
-            df['run_type_diversity'] = 0.0
-            df['is_fatigued'] = 0
-            df['has_momentum'] = 0
-            df['intensity_state'] = 'normal'
+            df["workload_ratio_hsr"] = 1.0
+            df["workload_ratio_sprints"] = 1.0
+            df["speed_decay"] = 1.0
+            df["positional_sprint_deviation"] = 0.0
+            df["positional_hsr_deviation"] = 0.0
+            df["run_type_diversity"] = 0.0
+            df["is_fatigued"] = 0
+            df["has_momentum"] = 0
+            df["intensity_state"] = "normal"
 
         return df
 
     def _add_derived_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add derived/interaction features"""
         # Interaction features
-        df['xt_per_pass'] = df['cumul_xt_added'] / (df['cumul_xt_count'] + 1)
+        df["xt_per_pass"] = df["cumul_xt_added"] / (df["cumul_xt_count"] + 1)
         # pressure_efficiency: progressive evasions per pressure event.
         # cumul_press_count is the total number of pressure events (a count, not a rate).
-        df['pressure_efficiency'] = df['cumul_progressive_press'] / (df['cumul_press_count'] + 1)
+        df["pressure_efficiency"] = df["cumul_progressive_press"] / (df["cumul_press_count"] + 1)
 
         # Physical efficiency
-        df['sprint_efficiency'] = df['cumul_sprints'] / (df['cumul_distance'] + 1)
-        df['hsr_efficiency'] = df['cumul_hsr'] / (df['cumul_distance'] + 1)
+        df["sprint_efficiency"] = df["cumul_sprints"] / (df["cumul_distance"] + 1)
+        df["hsr_efficiency"] = df["cumul_hsr"] / (df["cumul_distance"] + 1)
 
         # Position encoding
-        df['is_attacker'] = df['position'].isin(['A', 'F']).astype(int)
-        df['is_midfielder'] = (df['position'] == 'M').astype(int)
-        df['is_defender'] = (df['position'] == 'D').astype(int)
-        df['is_goalkeeper'] = (df['position'] == 'G').astype(int)
+        df["is_attacker"] = df["position"].isin(["A", "F"]).astype(int)
+        df["is_midfielder"] = (df["position"] == "M").astype(int)
+        df["is_defender"] = (df["position"] == "D").astype(int)
+        df["is_goalkeeper"] = (df["position"] == "G").astype(int)
 
         # Temporal features
-        df['is_late_game'] = (df['checkpoint_min'] >= 60).astype(int)
-        df['is_second_half'] = (df['checkpoint_period'] == 'half_2').astype(int)
+        df["is_late_game"] = (df["checkpoint_min"] >= 60).astype(int)
+        df["is_second_half"] = (df["checkpoint_period"] == "half_2").astype(int)
 
         # Shot efficiency
-        df['shot_accuracy'] = df['cumul_shots_on_target'] / (df['cumul_shots'] + 1)
-        df['shots_under_pressure_ratio'] = df['cumul_shots_under_press'] / (df['cumul_shots'] + 1)
+        df["shot_accuracy"] = df["cumul_shots_on_target"] / (df["cumul_shots"] + 1)
+        df["shots_under_pressure_ratio"] = df["cumul_shots_under_press"] / (df["cumul_shots"] + 1)
 
         print(f"  ✓ Added {13} Derived features")
 
         return df
 
     def _validate_features(
-        self,
-        engineered_df: pd.DataFrame,
-        original_df: Union[pd.DataFrame, 'cudf.DataFrame']
+        self, engineered_df: pd.DataFrame, original_df: Union[pd.DataFrame, "cudf.DataFrame"]
     ) -> pd.DataFrame:
         """
         Validate feature engineering integrity.
@@ -293,20 +282,27 @@ class FeatureFactory:
                 df[col] = df[col].replace([np.inf, -np.inf], [1e6, -1e6])
 
         # Check feature count
-        orig_cols = set(original_df.columns if isinstance(original_df, pd.DataFrame) else original_df.to_pandas().columns)
+        orig_cols = set(
+            original_df.columns
+            if isinstance(original_df, pd.DataFrame)
+            else original_df.to_pandas().columns
+        )
         new_features = set(df.columns) - orig_cols
         print(f"  ✓ Created {len(new_features)} new features")
 
         # Validate no leakage indicators
-        forbidden_keywords = ['outcome', 'result', 'goal', 'scored']
+        forbidden_keywords = ["outcome", "result", "goal", "scored"]
         suspicious_cols = [
-            col for col in df.columns
+            col
+            for col in df.columns
             if any(keyword in col.lower() for keyword in forbidden_keywords)
-            and col != 'scored_after'  # Target is allowed
+            and col != "scored_after"  # Target is allowed
         ]
 
         if suspicious_cols:
-            warnings.warn(f"Suspicious column names detected (potential leakage): {suspicious_cols}")
+            warnings.warn(
+                f"Suspicious column names detected (potential leakage): {suspicious_cols}"
+            )
 
         return df
 
@@ -321,48 +317,73 @@ class FeatureFactory:
             List of feature column names
         """
         # Expected Threat
-        xt_features = [
-            'last15_xt_added', 'cumul_xt_added',
-            'last15_xt_count', 'cumul_xt_count'
-        ]
+        xt_features = ["last15_xt_added", "cumul_xt_added", "last15_xt_count", "cumul_xt_count"]
 
         # Press Resistance
         press_features = [
-            'last15_press_retention', 'cumul_press_retention',
-            'last15_progressive_press', 'cumul_progressive_press',
-            'last15_press_angle_std', 'cumul_press_angle_std',
-            'last15_press_quality', 'cumul_press_quality',
-            'last15_press_count', 'cumul_press_count',
+            "last15_press_retention",
+            "cumul_press_retention",
+            "last15_progressive_press",
+            "cumul_progressive_press",
+            "last15_press_angle_std",
+            "cumul_press_angle_std",
+            "last15_press_quality",
+            "cumul_press_quality",
+            "last15_press_count",
+            "cumul_press_count",
         ]
 
         # Physical Metrics
         physical_features = [
-            'workload_ratio_hsr', 'workload_ratio_sprints',
-            'speed_decay', 'positional_sprint_deviation',
-            'positional_hsr_deviation', 'run_type_diversity',
-            'is_fatigued', 'has_momentum', 'intensity_state'
+            "workload_ratio_hsr",
+            "workload_ratio_sprints",
+            "speed_decay",
+            "positional_sprint_deviation",
+            "positional_hsr_deviation",
+            "run_type_diversity",
+            "is_fatigued",
+            "has_momentum",
+            "intensity_state",
         ]
 
         # Derived
         derived_features = [
-            'xt_per_pass', 'pressure_efficiency',
-            'sprint_efficiency', 'hsr_efficiency',
-            'is_attacker', 'is_midfielder', 'is_defender', 'is_goalkeeper',
-            'is_late_game', 'is_second_half',
-            'shot_accuracy', 'shots_under_pressure_ratio'
+            "xt_per_pass",
+            "pressure_efficiency",
+            "sprint_efficiency",
+            "hsr_efficiency",
+            "is_attacker",
+            "is_midfielder",
+            "is_defender",
+            "is_goalkeeper",
+            "is_late_game",
+            "is_second_half",
+            "shot_accuracy",
+            "shots_under_pressure_ratio",
         ]
 
         engineered = xt_features + press_features + physical_features + derived_features
 
         if include_base:
             base_features = [
-                'last15_sprints', 'last15_hsr', 'last15_distance',
-                'last15_mean_max_speed', 'last15_peak_speed',
-                'last15_shots', 'last15_shots_on_target',
-                'cumul_sprints', 'cumul_hsr', 'cumul_distance',
-                'cumul_mean_max_speed', 'cumul_peak_speed',
-                'cumul_shots', 'cumul_shots_on_target',
-                'position', 'is_home', 'checkpoint_min', 'is_second_half'
+                "last15_sprints",
+                "last15_hsr",
+                "last15_distance",
+                "last15_mean_max_speed",
+                "last15_peak_speed",
+                "last15_shots",
+                "last15_shots_on_target",
+                "cumul_sprints",
+                "cumul_hsr",
+                "cumul_distance",
+                "cumul_mean_max_speed",
+                "cumul_peak_speed",
+                "cumul_shots",
+                "cumul_shots_on_target",
+                "position",
+                "is_home",
+                "checkpoint_min",
+                "is_second_half",
             ]
             return base_features + engineered
 

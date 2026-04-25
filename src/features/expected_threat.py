@@ -5,12 +5,14 @@ Calculates the value of possession in different pitch zones and aggregates
 threat-adding actions per player per checkpoint.
 """
 
+from typing import Union
+
 import numpy as np
 import pandas as pd
-from typing import Union, Dict, Tuple
 
 try:
     import cudf
+
     CUDF_AVAILABLE = True
 except ImportError:
     CUDF_AVAILABLE = False
@@ -26,10 +28,10 @@ class ExpectedThreatCalculator:
 
     def __init__(
         self,
-        zones: list = None,
+        zones: list[str] | None = None,
         convergence_threshold: float = 0.001,
         max_iterations: int = 10,
-        use_gpu: bool = False
+        use_gpu: bool = False,
     ):
         """
         Initialize xT calculator
@@ -40,7 +42,7 @@ class ExpectedThreatCalculator:
             max_iterations: Maximum iterations for convergence
             use_gpu: Use cuDF backend
         """
-        self.zones = zones or ['bottom', 'middle', 'top']
+        self.zones = zones or ["bottom", "middle", "top"]
         self.convergence_threshold = convergence_threshold
         self.max_iterations = max_iterations
         self.use_gpu = use_gpu and CUDF_AVAILABLE
@@ -49,8 +51,7 @@ class ExpectedThreatCalculator:
         self.transition_matrix = None
 
     def compute_transition_matrix(
-        self,
-        pass_df: Union[pd.DataFrame, 'cudf.DataFrame']
+        self, pass_df: Union[pd.DataFrame, "cudf.DataFrame"]
     ) -> np.ndarray:
         """
         Compute zone transition probability matrix from pass data
@@ -65,22 +66,22 @@ class ExpectedThreatCalculator:
         """
         # Filter for accurate passes only
         if self.use_gpu:
-            accurate_passes = pass_df[pass_df['accurate'] == True].to_pandas()
+            accurate_passes = pass_df[pass_df["accurate"] == True].to_pandas()
         else:
-            accurate_passes = pass_df[pass_df['accurate'] == True].copy()
+            accurate_passes = pass_df[pass_df["accurate"] == True].copy()
 
         # Count transitions
         # Note: We don't have explicit destination zones, so we'll use sequential analysis
         # Group by player_appearance_id and sort by minute to infer transitions
-        accurate_passes = accurate_passes.sort_values(['player_appearance_id', 'minute'])
+        accurate_passes = accurate_passes.sort_values(["player_appearance_id", "minute"])
 
         # Create destination zone by shifting stage within same player/period
-        accurate_passes['dest_zone'] = accurate_passes.groupby(
-            ['player_appearance_id', 'period']
-        )['stage'].shift(-1)
+        accurate_passes["dest_zone"] = accurate_passes.groupby(["player_appearance_id", "period"])[
+            "stage"
+        ].shift(-1)
 
         # Remove NaN destinations (end of sequences)
-        transitions = accurate_passes.dropna(subset=['dest_zone'])
+        transitions = accurate_passes.dropna(subset=["dest_zone"])
 
         # Initialize transition matrix
         n_zones = len(self.zones)
@@ -91,12 +92,12 @@ class ExpectedThreatCalculator:
             origin_idx = self.zones.index(origin_zone)
 
             # Get all passes from this origin zone
-            from_zone = transitions[transitions['stage'] == origin_zone]
+            from_zone = transitions[transitions["stage"] == origin_zone]
 
             # Count destinations
             for dest_zone in self.zones:
                 dest_idx = self.zones.index(dest_zone)
-                count = (from_zone['dest_zone'] == dest_zone).sum()
+                count = (from_zone["dest_zone"] == dest_zone).sum()
                 transition_counts[origin_idx, dest_idx] = count
 
         # Convert counts to probabilities (row-wise normalization)
@@ -109,9 +110,9 @@ class ExpectedThreatCalculator:
 
     def compute_shot_probabilities(
         self,
-        shot_df: Union[pd.DataFrame, 'cudf.DataFrame'],
-        pass_df: Union[pd.DataFrame, 'cudf.DataFrame'] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        shot_df: Union[pd.DataFrame, "cudf.DataFrame"],
+        pass_df: Union[pd.DataFrame, "cudf.DataFrame"] = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute P(shot|zone) from actual shot/pass data and P(goal|shot, zone) from
         domain-knowledge conversion rates (shot outcomes excluded to prevent leakage).
@@ -139,11 +140,11 @@ class ExpectedThreatCalculator:
         shot_probs = np.zeros(n_zones)
 
         # Derive P(shot|zone) from actual shot counts vs total possessions
-        shot_counts = shot_df['stage'].value_counts()
+        shot_counts = shot_df["stage"].value_counts()
 
         if pass_df is not None:
-            accurate_passes = pass_df[pass_df['accurate'] == True]
-            pass_counts = accurate_passes['stage'].value_counts()
+            accurate_passes = pass_df[pass_df["accurate"] == True]
+            pass_counts = accurate_passes["stage"].value_counts()
         else:
             pass_counts = pd.Series(dtype=int)
 
@@ -157,21 +158,16 @@ class ExpectedThreatCalculator:
         # Shot outcome columns are excluded from the feature dataset to prevent leakage,
         # so we use published football statistics here.
         zone_conversion_rates = {
-            'bottom': 0.02,   # Almost never score from own half
-            'middle': 0.05,   # Low conversion from distance
-            'top': 0.12,      # Reasonable conversion in attacking third
+            "bottom": 0.02,  # Almost never score from own half
+            "middle": 0.05,  # Low conversion from distance
+            "top": 0.12,  # Reasonable conversion in attacking third
         }
-        goal_probs = np.array([
-            zone_conversion_rates.get(zone, 0.05) for zone in self.zones
-        ])
+        goal_probs = np.array([zone_conversion_rates.get(zone, 0.05) for zone in self.zones])
 
         return shot_probs, goal_probs
 
     def iterate_threat_values(
-        self,
-        transition_matrix: np.ndarray,
-        shot_probs: np.ndarray,
-        goal_probs: np.ndarray
+        self, transition_matrix: np.ndarray, shot_probs: np.ndarray, goal_probs: np.ndarray
     ) -> np.ndarray:
         """
         Iteratively compute Expected Threat values until convergence
@@ -216,9 +212,9 @@ class ExpectedThreatCalculator:
 
     def fit(
         self,
-        pass_df: Union[pd.DataFrame, 'cudf.DataFrame'],
-        shot_df: Union[pd.DataFrame, 'cudf.DataFrame']
-    ) -> 'ExpectedThreatCalculator':
+        pass_df: Union[pd.DataFrame, "cudf.DataFrame"],
+        shot_df: Union[pd.DataFrame, "cudf.DataFrame"],
+    ) -> "ExpectedThreatCalculator":
         """
         Fit Expected Threat model
 
@@ -248,9 +244,8 @@ class ExpectedThreatCalculator:
         return self
 
     def calculate_threat_added(
-        self,
-        pass_df: Union[pd.DataFrame, 'cudf.DataFrame']
-    ) -> Union[pd.DataFrame, 'cudf.DataFrame']:
+        self, pass_df: Union[pd.DataFrame, "cudf.DataFrame"]
+    ) -> Union[pd.DataFrame, "cudf.DataFrame"]:
         """
         Calculate threat added for each pass
 
@@ -275,19 +270,23 @@ class ExpectedThreatCalculator:
         # Map zones to threat values
         zone_to_threat = dict(zip(self.zones, self.zone_threat_values))
 
+        # Ensure stage and period are strings for operations (may be Categorical)
+        df["stage"] = df["stage"].astype(str)
+        df["period"] = df["period"].astype(str)
+
         # Get origin threat
-        df['origin_threat'] = df['stage'].map(zone_to_threat)
+        df["origin_threat"] = df["stage"].map(zone_to_threat)
 
         # Get destination threat (from sequential analysis)
-        df = df.sort_values(['player_appearance_id', 'period', 'minute'])
-        df['dest_zone'] = df.groupby(['player_appearance_id', 'period'])['stage'].shift(-1)
-        df['dest_threat'] = df['dest_zone'].map(zone_to_threat)
+        df = df.sort_values(["player_appearance_id", "period", "minute"])
+        df["dest_zone"] = df.groupby(["player_appearance_id", "period"])["stage"].shift(-1)
+        df["dest_threat"] = df["dest_zone"].map(zone_to_threat)
 
         # Calculate threat added
-        df['threat_added'] = df['dest_threat'] - df['origin_threat']
+        df["threat_added"] = df["dest_threat"] - df["origin_threat"]
 
         # Only keep rows with valid threat calculations
-        df = df.dropna(subset=['threat_added'])
+        df = df.dropna(subset=["threat_added"])
 
         # Convert back to cuDF if needed
         if use_cudf:
@@ -296,11 +295,11 @@ class ExpectedThreatCalculator:
 
 
 def aggregate_xt_features(
-    pass_df: Union[pd.DataFrame, 'cudf.DataFrame'],
-    checkpoint_df: Union[pd.DataFrame, 'cudf.DataFrame'],
+    pass_df: Union[pd.DataFrame, "cudf.DataFrame"],
+    checkpoint_df: Union[pd.DataFrame, "cudf.DataFrame"],
     xt_calculator: ExpectedThreatCalculator,
-    use_gpu: bool = False
-) -> Union[pd.DataFrame, 'cudf.DataFrame']:
+    use_gpu: bool = False,
+) -> Union[pd.DataFrame, "cudf.DataFrame"]:
     """
     Aggregate Expected Threat features per player per checkpoint.
 
@@ -327,50 +326,54 @@ def aggregate_xt_features(
         passes_pd = passes_with_threat
         checkpoint_pd = checkpoint_df.copy()
 
-    group_keys = ['player_appearance_id', 'checkpoint_min', 'checkpoint_period']
+    group_keys = ["player_appearance_id", "checkpoint_min", "checkpoint_period"]
 
     # Cross-join passes with checkpoints per player, then apply temporal filters.
     # Each pass row is duplicated for every checkpoint of the same player.
     merged = passes_pd.merge(
-        checkpoint_pd[['player_appearance_id', 'checkpoint_min', 'checkpoint_period', 'minute_in']],
-        on='player_appearance_id',
-        how='inner'
+        checkpoint_pd[["player_appearance_id", "checkpoint_min", "checkpoint_period", "minute_in"]],
+        on="player_appearance_id",
+        how="inner",
     )
+
+    # Ensure period columns are strings for comparison (may be Categorical dtype)
+    merged["period"] = merged["period"].astype(str)
+    merged["checkpoint_period"] = merged["checkpoint_period"].astype(str)
 
     # --- Cumulative window: minute_in <= minute <= checkpoint_min, same period ---
     cumul_mask = (
-        (merged['period'] == merged['checkpoint_period']) &
-        (merged['minute'] >= merged['minute_in']) &
-        (merged['minute'] <= merged['checkpoint_min'])
+        (merged["period"] == merged["checkpoint_period"])
+        & (merged["minute"] >= merged["minute_in"])
+        & (merged["minute"] <= merged["checkpoint_min"])
     )
     cumul_agg = (
         merged[cumul_mask]
         .groupby(group_keys, sort=False)
-        .agg(cumul_xt_added=('threat_added', 'sum'), cumul_xt_count=('threat_added', 'count'))
+        .agg(cumul_xt_added=("threat_added", "sum"), cumul_xt_count=("threat_added", "count"))
         .reset_index()
     )
 
     # --- Rolling 15-min window: checkpoint_min-15 < minute <= checkpoint_min, same period ---
     last15_mask = (
-        (merged['period'] == merged['checkpoint_period']) &
-        (merged['minute'] > merged['checkpoint_min'] - 15) &
-        (merged['minute'] <= merged['checkpoint_min'])
+        (merged["period"] == merged["checkpoint_period"])
+        & (merged["minute"] > merged["checkpoint_min"] - 15)
+        & (merged["minute"] <= merged["checkpoint_min"])
     )
     last15_agg = (
         merged[last15_mask]
         .groupby(group_keys, sort=False)
-        .agg(last15_xt_added=('threat_added', 'sum'), last15_xt_count=('threat_added', 'count'))
+        .agg(last15_xt_added=("threat_added", "sum"), last15_xt_count=("threat_added", "count"))
         .reset_index()
     )
 
     # Merge aggregated features back to checkpoint_pd; fill 0 where no passes found
-    checkpoint_pd = checkpoint_pd.merge(cumul_agg, on=group_keys, how='left')
-    checkpoint_pd = checkpoint_pd.merge(last15_agg, on=group_keys, how='left')
+    checkpoint_pd = checkpoint_pd.merge(cumul_agg, on=group_keys, how="left")
+    checkpoint_pd = checkpoint_pd.merge(last15_agg, on=group_keys, how="left")
 
-    checkpoint_pd['cumul_xt_added'] = checkpoint_pd['cumul_xt_added'].fillna(0.0)
-    checkpoint_pd['cumul_xt_count'] = checkpoint_pd['cumul_xt_count'].fillna(0).astype(int)
-    checkpoint_pd['last15_xt_added'] = checkpoint_pd['last15_xt_added'].fillna(0.0)
-    checkpoint_pd['last15_xt_count'] = checkpoint_pd['last15_xt_count'].fillna(0).astype(int)
+    checkpoint_pd["cumul_xt_added"] = checkpoint_pd["cumul_xt_added"].fillna(0.0)
+    checkpoint_pd["cumul_xt_count"] = checkpoint_pd["cumul_xt_count"].fillna(0).astype(int)
+    checkpoint_pd["last15_xt_added"] = checkpoint_pd["last15_xt_added"].fillna(0.0)
+    checkpoint_pd["last15_xt_count"] = checkpoint_pd["last15_xt_count"].fillna(0).astype(int)
 
     # Convert back to cuDF if needed
     if use_gpu and CUDF_AVAILABLE:
