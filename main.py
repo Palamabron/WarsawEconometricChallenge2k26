@@ -159,7 +159,7 @@ def main(args):
 
         # Find optimal threshold
         precision, recall, thresholds = precision_recall_curve(y_val, y_pred_proba)
-        f1_scores = 2 * (precision * recall) / (precision + recall + 1e-10)
+        f1_scores = 2 * (precision[:-1] * recall[:-1]) / (precision[:-1] + recall[:-1] + 1e-10)
         best_threshold = thresholds[np.argmax(f1_scores)]
 
         y_pred = (y_pred_proba >= best_threshold).astype(int)
@@ -190,7 +190,7 @@ def main(args):
 
     # Find optimal overall threshold
     precision, recall, thresholds = precision_recall_curve(y, oof_predictions)
-    f1_scores = 2 * (precision * recall) / (precision + recall + 1e-10)
+    f1_scores = 2 * (precision[:-1] * recall[:-1]) / (precision[:-1] + recall[:-1] + 1e-10)
     best_overall_threshold = thresholds[np.argmax(f1_scores)]
 
     oof_pred_labels = (oof_predictions >= best_overall_threshold).astype(int)

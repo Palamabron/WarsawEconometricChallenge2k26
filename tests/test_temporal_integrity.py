@@ -114,5 +114,45 @@ def test_feature_leakage_correlation():
     assert abs(suspicious["suspicious_feature"]) > 0.9
 
 
+def test_safe_temporal_merge_retains_checkpoints_without_events():
+    """Test that checkpoints with no matching events are preserved with NaN event columns"""
+
+    checkpoint_df = pd.DataFrame(
+        {
+            "player_appearance_id": [1, 3],
+            "checkpoint_min": [15, 20],
+            "minute_in": [1, 1],
+            "minute_out": [90, 90],
+            "scored_after": [0, 0],
+        }
+    )
+
+    event_df = pd.DataFrame(
+        {
+            "player_appearance_id": [1, 1],
+            "minute": [5, 10],
+            "value": [1, 2],
+        }
+    )
+
+    merged = safe_temporal_merge(
+        checkpoint_df,
+        event_df,
+        on=["player_appearance_id"],
+        checkpoint_col="checkpoint_min",
+        event_time_col="minute",
+    )
+
+    unmatched_rows = merged[merged["player_appearance_id"] == 3]
+
+    # The checkpoint with no matching events should still be present
+    assert len(unmatched_rows) == 1
+    assert unmatched_rows["checkpoint_min"].iloc[0] == 20
+
+    # Event-side columns should be NaN for the unmatched checkpoint row
+    assert pd.isna(unmatched_rows["minute"].iloc[0])
+    assert pd.isna(unmatched_rows["value"].iloc[0])
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

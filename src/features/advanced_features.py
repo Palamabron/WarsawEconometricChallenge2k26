@@ -84,22 +84,18 @@ def add_shot_quality_features(
     )
     merged["is_head"] = merged["body_part"] == "head"
 
+    # Pre-compute combined boolean columns for vectorized aggregation
+    merged["is_counter_last15"] = merged["is_counter"] & merged["is_last15"]
+    merged["is_setpiece_last15"] = merged["is_setpiece"] & merged["is_last15"]
+    merged["is_head_cumul"] = merged["is_head"] & merged["is_cumul"]
+
     # Aggregate by player and checkpoint
     shot_agg = (
         merged.groupby(["player_appearance_id", "checkpoint_min", "checkpoint_period"])
         .agg(
-            shot_from_counter_last15=(
-                "is_counter",
-                lambda x: (x & merged.loc[x.index, "is_last15"]).sum(),
-            ),
-            shot_from_setpiece_last15=(
-                "is_setpiece",
-                lambda x: (x & merged.loc[x.index, "is_last15"]).sum(),
-            ),
-            head_shot_count_cumul=(
-                "is_head",
-                lambda x: (x & merged.loc[x.index, "is_cumul"]).sum(),
-            ),
+            shot_from_counter_last15=("is_counter_last15", "sum"),
+            shot_from_setpiece_last15=("is_setpiece_last15", "sum"),
+            head_shot_count_cumul=("is_head_cumul", "sum"),
             total_shot_count_cumul=("is_cumul", "sum"),
             last5_shot_count=("is_last5", "sum"),
         )
@@ -256,15 +252,15 @@ def add_pressure_intensity_features(
     merged["is_last5"] = merged["minute"] > (merged["checkpoint_min"] - 5)
     merged["is_forward_escape"] = merged["press_induced_outcome"] == "forward_pass"
 
+    # Pre-compute combined boolean column for vectorized aggregation
+    merged["is_forward_escape_cumul"] = merged["is_forward_escape"] & merged["is_cumul"]
+
     # Aggregate by player and checkpoint
     pressure_agg = (
         merged.groupby(["player_appearance_id", "checkpoint_min", "checkpoint_period"])
         .agg(
             cumul_pressure_count=("is_cumul", "sum"),
-            forward_escape_count=(
-                "is_forward_escape",
-                lambda x: (x & merged.loc[x.index, "is_cumul"]).sum(),
-            ),
+            forward_escape_count=("is_forward_escape_cumul", "sum"),
             last5_pressure_count=("is_last5", "sum"),
         )
         .reset_index()

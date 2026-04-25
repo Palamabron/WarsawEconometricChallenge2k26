@@ -84,8 +84,8 @@ class Config:
 
     @property
     def random_state(self) -> int:
-        """Random seed for reproducibility"""
-        return self.get("random_seed", 42)
+        """Random seed for reproducibility (prefers cross_validation.random_state)"""
+        return self.get("cross_validation.random_state", self.get("random_seed", 42))
 
     @property
     def group_by_column(self) -> str:

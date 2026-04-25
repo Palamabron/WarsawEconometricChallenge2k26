@@ -105,7 +105,14 @@ class DataIngestion:
         for col in float_cols:
             dtypes[col] = "float32"
 
-        df = df_lib.read_csv(filepath, dtype=dtypes, parse_dates=["date"])
+        df = df_lib.read_csv(
+            filepath,
+            dtype=dtypes,
+            parse_dates=["date"],
+            true_values=["TRUE"],
+            false_values=["FALSE"],
+            na_values=["NULL"],
+        )
 
         # Validate data
         self._validate_checkpoint_data(df)
@@ -130,7 +137,13 @@ class DataIngestion:
             "stage": "category",
         }
 
-        df = df_lib.read_csv(filepath, dtype=dtypes)
+        df = df_lib.read_csv(
+            filepath,
+            dtype=dtypes,
+            true_values=["TRUE"],
+            false_values=["FALSE"],
+            na_values=["NULL"],
+        )
 
         print(f"Loaded {len(df)} pass events")
         return df
@@ -155,7 +168,13 @@ class DataIngestion:
             "player_appearance_id": "int32",
         }
 
-        df = df_lib.read_csv(filepath, dtype=dtypes)
+        df = df_lib.read_csv(
+            filepath,
+            dtype=dtypes,
+            true_values=["TRUE"],
+            false_values=["FALSE"],
+            na_values=["NULL"],
+        )
 
         print(f"Loaded {len(df)} run events")
         return df
@@ -184,7 +203,13 @@ class DataIngestion:
             "under_pressure": "bool",
         }
 
-        df = df_lib.read_csv(filepath, dtype=dtypes)
+        df = df_lib.read_csv(
+            filepath,
+            dtype=dtypes,
+            true_values=["TRUE"],
+            false_values=["FALSE"],
+            na_values=["NULL"],
+        )
 
         # CRITICAL: Drop outcome columns to prevent leakage
         leakage_cols = ["outcome", "result", "goal", "scored"]
@@ -216,7 +241,13 @@ class DataIngestion:
             "stage": "category",
         }
 
-        df = df_lib.read_csv(filepath, dtype=dtypes)
+        df = df_lib.read_csv(
+            filepath,
+            dtype=dtypes,
+            true_values=["TRUE"],
+            false_values=["FALSE"],
+            na_values=["NULL"],
+        )
 
         print(f"Loaded {len(df)} pressure events")
         return df

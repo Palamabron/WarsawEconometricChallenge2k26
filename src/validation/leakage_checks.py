@@ -72,7 +72,31 @@ class LeakageValidator:
                 f"These should be excluded from training."
             )
 
-        # Check 2: No forbidden columns
+        # Check 2: Event minutes <= max checkpoint minute for that player
+        print("  ✓ Checking event temporal boundaries...")
+        max_checkpoint_per_player = checkpoint_pd.groupby("player_appearance_id")[
+            "checkpoint_min"
+        ].max()
+        for event_name, event_df in event_dfs.items():
+            if CUDF_AVAILABLE and isinstance(event_df, cudf.DataFrame):
+                event_pd = event_df.to_pandas()
+            else:
+                event_pd = event_df
+            if "minute" not in event_pd.columns or "player_appearance_id" not in event_pd.columns:
+                continue
+            merged_check = event_pd.merge(
+                max_checkpoint_per_player.rename("max_checkpoint"),
+                on="player_appearance_id",
+                how="inner",
+            )
+            future_events = merged_check[merged_check["minute"] > merged_check["max_checkpoint"]]
+            if len(future_events) > 0:
+                warnings.warn(
+                    f"Event dataset '{event_name}': found {len(future_events)} events "
+                    f"occurring after the player's last checkpoint minute."
+                )
+
+        # Check 4: No forbidden columns
         print("  ✓ Checking for forbidden columns...")
         forbidden_keywords = ["outcome", "result", "goal_scored", "goal_conceded"]
         forbidden_cols = [
@@ -85,7 +109,7 @@ class LeakageValidator:
         if forbidden_cols:
             raise ValueError(f"Forbidden columns detected (potential leakage): {forbidden_cols}")
 
-        # Check 3: Feature value ranges
+        # Check 5: Feature value ranges
         print("  ✓ Checking feature value ranges...")
         numeric_cols = engineered_pd.select_dtypes(include=[np.number]).columns
 
@@ -210,9 +234,12 @@ def safe_temporal_merge(
     # Merge
     merged = left_df.merge(right_df, on=on, how="left", suffixes=("", "_event"))
 
-    # Filter to past events only
+    # Filter to past events only while preserving unmatched left rows
     if event_time_col in merged.columns:
-        valid_mask = merged[event_time_col] <= merged[checkpoint_col]
+        valid_mask = (
+            merged[event_time_col].isna()
+            | (merged[event_time_col] <= merged[checkpoint_col])
+        )
         merged = merged[valid_mask]
 
     return merged

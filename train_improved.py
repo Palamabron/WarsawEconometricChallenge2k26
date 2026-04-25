@@ -19,7 +19,6 @@ from xgboost import XGBClassifier
 from src.config import get_config
 from src.data_ingestion import DataIngestion
 from src.feature_factory import FeatureFactory
-from src.models.focal_loss import FocalLoss, focal_loss_xgboost
 from src.validation.cross_validator import create_cross_validator
 from src.validation.leakage_checks import LeakageValidator
 
@@ -121,9 +120,6 @@ def main():
 
     cv = create_cross_validator()
 
-    # Initialize focal loss
-    focal = FocalLoss(alpha=0.94, gamma=2.0)  # From config
-
     oof_predictions = np.zeros(len(X))
     fold_scores = []
 
@@ -178,7 +174,7 @@ def main():
 
         # Find optimal threshold
         precision, recall, thresholds = precision_recall_curve(y_val, y_pred_proba)
-        f1_scores = 2 * (precision * recall) / (precision + recall + 1e-10)
+        f1_scores = 2 * (precision[:-1] * recall[:-1]) / (precision[:-1] + recall[:-1] + 1e-10)
         best_threshold = thresholds[np.argmax(f1_scores)]
 
         y_pred = (y_pred_proba >= best_threshold).astype(int)
@@ -209,7 +205,7 @@ def main():
 
     # Find optimal overall threshold
     precision, recall, thresholds = precision_recall_curve(y, oof_predictions)
-    f1_scores = 2 * (precision * recall) / (precision + recall + 1e-10)
+    f1_scores = 2 * (precision[:-1] * recall[:-1]) / (precision[:-1] + recall[:-1] + 1e-10)
     best_overall_threshold = thresholds[np.argmax(f1_scores)]
 
     oof_pred_labels = (oof_predictions >= best_overall_threshold).astype(int)

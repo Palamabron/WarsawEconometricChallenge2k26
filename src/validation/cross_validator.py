@@ -42,14 +42,15 @@ class FixtureGroupKFold:
         self.random_state = random_state
         self.stratify = stratify
 
-        # GroupKFold does not support shuffle/random_state. Use StratifiedGroupKFold
-        # when shuffle is requested (it supports both shuffle and random_state) or
-        # when stratification is explicitly requested.
-        if stratify or shuffle:
+        if stratify:
+            # Use StratifiedGroupKFold only when stratification is explicitly requested
             self.splitter = StratifiedGroupKFold(
-                n_splits=n_splits, shuffle=shuffle, random_state=random_state
+                n_splits=n_splits, shuffle=shuffle, random_state=random_state if shuffle else None
             )
         else:
+            # GroupKFold does not natively support shuffle, so when shuffle is requested
+            # without stratification, we permute unique groups via random_state before
+            # splitting (handled in the split() method) and use plain GroupKFold.
             self.splitter = GroupKFold(n_splits=n_splits)
 
     def split(
@@ -78,6 +79,17 @@ class FixtureGroupKFold:
             y = y.to_numpy()
         if isinstance(groups, pd.Series):
             groups = groups.to_numpy()
+
+        # When shuffle=True but stratify=False, permute unique groups with random_state
+        # so that GroupKFold assigns shuffled groups to folds
+        if self.shuffle and not self.stratify:
+            rng = np.random.default_rng(self.random_state)
+            unique_groups = np.unique(groups)
+            shuffled_groups = rng.permutation(unique_groups)
+            # Remap group labels to their shuffled position so GroupKFold splits them in
+            # the permuted order rather than the original sorted order
+            group_map = {g: i for i, g in enumerate(shuffled_groups)}
+            groups = np.array([group_map[g] for g in groups])
 
         # Generate splits
         fold_num = 1
