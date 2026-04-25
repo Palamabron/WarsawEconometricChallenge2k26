@@ -1,0 +1,77 @@
+# Warsaw Econometric Challenge 2026 - Configuration
+
+data:
+  data_dir: "data"
+  checkpoint_file: "players_quarters_final.csv"
+  pass_file: "player_appearance_pass.csv"
+  run_file: "player_appearance_run.csv"
+  shot_file: "player_appearance_shot_limited.csv"
+  pressure_file: "player_appearance_behaviour_under_pressure.csv"
+
+outputs:
+  models_dir: "outputs/models"
+  predictions_dir: "outputs/predictions"
+  reports_dir: "outputs/reports"
+
+cross_validation:
+  n_folds: 5
+  random_state: 42
+  group_by: "fixture_id"  # Critical: Group by match to prevent leakage
+  stratify: true
+
+features:
+  expected_threat:
+    convergence_threshold: 0.001
+    max_iterations: 10
+    zones: ["bottom", "middle", "top"]
+
+  press_resistance:
+    positive_outcomes: ["forward_pass", "backward_pass", "ball_carry"]
+    negative_outcomes: ["turnover"]
+
+  physical:
+    fatigue_threshold_low: 0.8
+    momentum_threshold_high: 1.2
+    speed_decay_threshold: 0.9
+
+models:
+  tabpfn:
+    n_estimators: 16
+    device: "auto"  # auto-detect GPU/CPU
+
+  catboost:
+    iterations: 1000
+    learning_rate: 0.05
+    max_depth: 6
+    l2_leaf_reg: 10
+    early_stopping_rounds: 50
+    grow_policy: "Lossguide"  # Required for custom loss on GPU
+    verbose: false
+
+  focal_loss:
+    gamma: 2.0  # Focus on hard examples
+    alpha: 0.94  # Inverse class frequency (1 - 0.058)
+
+hyperparameter_optimization:
+  enabled: false  # Set true to run Optuna optimization
+  n_trials: 100
+  metric: "f1"  # Options: f1, f_beta, pr_auc
+  f_beta: 2.0  # Weight recall higher for rare events
+  search_space:
+    gamma: [1.0, 5.0]
+    alpha: [0.85, 0.98]
+    max_depth: [4, 8]
+    l2_leaf_reg: [5, 50]
+    learning_rate: [0.01, 0.1]
+
+ensemble:
+  meta_learner: "logistic_regression"
+  use_stacking: true
+  class_weight: "balanced"
+
+performance_targets:
+  min_f1: 0.30
+  min_pr_auc: 0.40
+  max_brier_score: 0.06
+
+random_seed: 42
