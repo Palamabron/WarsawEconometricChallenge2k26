@@ -22,6 +22,7 @@ from src.config import get_config
 from src.data_ingestion import DataIngestion
 from src.feature_factory import FeatureFactory
 from src.features.advanced_features import add_all_advanced_features
+from src.preprocessing import CategoricalEncoder
 from src.validation.cross_validator import create_cross_validator
 from src.validation.leakage_checks import LeakageValidator
 
@@ -87,11 +88,6 @@ def main():
         y = y.to_pandas()
         groups = groups.to_pandas()
 
-    # Handle categorical
-    categorical_cols = X.select_dtypes(include=["object", "category"]).columns
-    for col in categorical_cols:
-        X[col] = X[col].astype("category").cat.codes
-
     print(f"\n" + "=" * 80)
     print("DATASET SUMMARY")
     print("=" * 80)
@@ -114,6 +110,11 @@ def main():
 
         X_train, X_val = X.iloc[train_idx].copy(), X.iloc[val_idx].copy()
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+
+        # Encode categorical features consistently
+        encoder = CategoricalEncoder()
+        X_train = encoder.fit_transform(X_train)
+        X_val = encoder.transform(X_val)
 
         # Scale
         scaler = StandardScaler()

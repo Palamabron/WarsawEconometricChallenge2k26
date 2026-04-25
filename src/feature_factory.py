@@ -15,6 +15,7 @@ from src.config import get_config
 from src.features.expected_threat import ExpectedThreatCalculator, aggregate_xt_features
 from src.features.physical_metrics import calculate_fatigue_indicators, calculate_physical_features
 from src.features.press_resistance import calculate_press_resistance_features
+from src.preprocessing import CategoricalEncoder
 
 try:
     import cudf
@@ -388,3 +389,57 @@ class FeatureFactory:
             return base_features + engineered
 
         return engineered
+
+    @staticmethod
+    def prepare_for_modeling(
+        df: pd.DataFrame,
+        target_col: str = "scored_after",
+        encoder: CategoricalEncoder | None = None,
+        fit_encoder: bool = False,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, CategoricalEncoder]:
+        """
+        Prepare features for modeling with consistent categorical encoding.
+
+        Args:
+            df: Feature DataFrame
+            target_col: Name of target column
+            encoder: Pre-fitted encoder (for validation/test sets)
+            fit_encoder: If True, fit new encoder on this data (for training sets)
+
+        Returns:
+            Tuple of (X_features, X_encoded, y_target, encoder)
+        """
+        exclude_cols = [
+            "player_appearance_id",
+            "player_id",
+            "fixture_id",
+            "date",
+            "checkpoint",
+            "checkpoint_period",
+            "formation",
+            "jersey_number",
+            target_col,
+            "minute_in",
+            "minute_out",
+            "subbed",
+        ]
+
+        feature_cols = [col for col in df.columns if col not in exclude_cols]
+        X = df[feature_cols].copy()
+        y = df[target_col].copy()
+
+        # Handle cuDF
+        if hasattr(X, "to_pandas"):
+            X = X.to_pandas()
+            y = y.to_pandas()
+
+        # Encode categorical features consistently
+        if fit_encoder:
+            encoder = CategoricalEncoder()
+            X_encoded = encoder.fit_transform(X)
+        elif encoder is not None:
+            X_encoded = encoder.transform(X)
+        else:
+            raise ValueError("Must provide encoder or set fit_encoder=True")
+
+        return X, X_encoded, y, encoder

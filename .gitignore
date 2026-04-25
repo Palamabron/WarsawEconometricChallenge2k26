@@ -66,6 +66,9 @@ htmlcov/
 # GPU cache
 .nv/
 
+# CatBoost artifacts
+catboost_info/
+
 # Model files
 *.pkl
 *.joblib

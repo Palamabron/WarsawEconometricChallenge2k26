@@ -173,7 +173,7 @@ def _calculate_single_checkpoint_features(
     positive_count = pressure_events[
         pressure_events["press_induced_outcome"].isin(positive_outcomes)
     ].shape[0]
-    retention_rate = positive_count / len(pressure_events)
+    retention_rate = positive_count / max(len(pressure_events), 1)
 
     # 2. Progressive Press Evasion
     progressive_count = pressure_events[
@@ -232,7 +232,7 @@ def _calculate_baseline_turnover_rates(
             0
         ]
 
-        baseline_rates[zone] = turnovers / len(zone_events)
+        baseline_rates[zone] = turnovers / max(len(zone_events), 1)
 
     return baseline_rates
 
