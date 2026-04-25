@@ -9,7 +9,6 @@ Top predictors identified:
 """
 
 import numpy as np
-import pandas as pd
 
 from src.types import DataFrame
 
@@ -60,9 +59,7 @@ def add_shot_quality_features(
 
     # Merge shots with checkpoint data
     merged = shot_pd.merge(
-        checkpoint_pd[
-            ["player_appearance_id", "checkpoint_min", "checkpoint_period", "minute_in"]
-        ],
+        checkpoint_pd[["player_appearance_id", "checkpoint_min", "checkpoint_period", "minute_in"]],
         on="player_appearance_id",
         how="inner",
     )
@@ -73,7 +70,8 @@ def add_shot_quality_features(
 
     # Filter temporally valid shots
     merged = merged[
-        (merged["period"] == merged["checkpoint_period"]) & (merged["minute"] <= merged["checkpoint_min"])
+        (merged["period"] == merged["checkpoint_period"])
+        & (merged["minute"] <= merged["checkpoint_min"])
     ]
 
     # Create time window indicators
@@ -90,9 +88,18 @@ def add_shot_quality_features(
     shot_agg = (
         merged.groupby(["player_appearance_id", "checkpoint_min", "checkpoint_period"])
         .agg(
-            shot_from_counter_last15=("is_counter", lambda x: (x & merged.loc[x.index, "is_last15"]).sum()),
-            shot_from_setpiece_last15=("is_setpiece", lambda x: (x & merged.loc[x.index, "is_last15"]).sum()),
-            head_shot_count_cumul=("is_head", lambda x: (x & merged.loc[x.index, "is_cumul"]).sum()),
+            shot_from_counter_last15=(
+                "is_counter",
+                lambda x: (x & merged.loc[x.index, "is_last15"]).sum(),
+            ),
+            shot_from_setpiece_last15=(
+                "is_setpiece",
+                lambda x: (x & merged.loc[x.index, "is_last15"]).sum(),
+            ),
+            head_shot_count_cumul=(
+                "is_head",
+                lambda x: (x & merged.loc[x.index, "is_cumul"]).sum(),
+            ),
             total_shot_count_cumul=("is_cumul", "sum"),
             last5_shot_count=("is_last5", "sum"),
         )
@@ -112,11 +119,17 @@ def add_shot_quality_features(
     )
 
     # Fill NaN for players with no shots
-    checkpoint_pd["shot_from_counter_last15"] = checkpoint_pd["shot_from_counter_last15"].fillna(0).astype(int)
-    checkpoint_pd["shot_from_setpiece_last15"] = checkpoint_pd["shot_from_setpiece_last15"].fillna(0).astype(int)
+    checkpoint_pd["shot_from_counter_last15"] = (
+        checkpoint_pd["shot_from_counter_last15"].fillna(0).astype(int)
+    )
+    checkpoint_pd["shot_from_setpiece_last15"] = (
+        checkpoint_pd["shot_from_setpiece_last15"].fillna(0).astype(int)
+    )
     checkpoint_pd["head_shot_ratio_cumul"] = checkpoint_pd["head_shot_ratio_cumul"].fillna(0.0)
     checkpoint_pd["last5_shot_count"] = checkpoint_pd["last5_shot_count"].fillna(0).astype(int)
-    checkpoint_pd["total_shot_count_cumul"] = checkpoint_pd["total_shot_count_cumul"].fillna(0).astype(int)
+    checkpoint_pd["total_shot_count_cumul"] = (
+        checkpoint_pd["total_shot_count_cumul"].fillna(0).astype(int)
+    )
 
     # Shot frequency (shots per minute on pitch)
     checkpoint_pd["shot_frequency_per_min"] = checkpoint_pd["total_shot_count_cumul"] / np.maximum(
@@ -132,9 +145,7 @@ def add_shot_quality_features(
     return checkpoint_pd
 
 
-def add_temporal_trends(
-    checkpoint_df: DataFrame, use_gpu: bool = False
-) -> DataFrame:
+def add_temporal_trends(checkpoint_df: DataFrame, use_gpu: bool = False) -> DataFrame:
     """
     Add temporal trend features (acceleration/deceleration).
 
@@ -225,9 +236,7 @@ def add_pressure_intensity_features(
 
     # Merge pressure with checkpoint data
     merged = pressure_pd.merge(
-        checkpoint_pd[
-            ["player_appearance_id", "checkpoint_min", "checkpoint_period", "minute_in"]
-        ],
+        checkpoint_pd[["player_appearance_id", "checkpoint_min", "checkpoint_period", "minute_in"]],
         on="player_appearance_id",
         how="inner",
     )
@@ -238,7 +247,8 @@ def add_pressure_intensity_features(
 
     # Filter temporally valid pressure events
     merged = merged[
-        (merged["period"] == merged["checkpoint_period"]) & (merged["minute"] <= merged["checkpoint_min"])
+        (merged["period"] == merged["checkpoint_period"])
+        & (merged["minute"] <= merged["checkpoint_min"])
     ]
 
     # Create indicators
@@ -251,7 +261,10 @@ def add_pressure_intensity_features(
         merged.groupby(["player_appearance_id", "checkpoint_min", "checkpoint_period"])
         .agg(
             cumul_pressure_count=("is_cumul", "sum"),
-            forward_escape_count=("is_forward_escape", lambda x: (x & merged.loc[x.index, "is_cumul"]).sum()),
+            forward_escape_count=(
+                "is_forward_escape",
+                lambda x: (x & merged.loc[x.index, "is_cumul"]).sum(),
+            ),
             last5_pressure_count=("is_last5", "sum"),
         )
         .reset_index()
@@ -265,9 +278,15 @@ def add_pressure_intensity_features(
     )
 
     # Fill NaN
-    checkpoint_pd["cumul_pressure_count"] = checkpoint_pd["cumul_pressure_count"].fillna(0).astype(int)
-    checkpoint_pd["forward_escape_count"] = checkpoint_pd["forward_escape_count"].fillna(0).astype(int)
-    checkpoint_pd["last5_pressure_count"] = checkpoint_pd["last5_pressure_count"].fillna(0).astype(int)
+    checkpoint_pd["cumul_pressure_count"] = (
+        checkpoint_pd["cumul_pressure_count"].fillna(0).astype(int)
+    )
+    checkpoint_pd["forward_escape_count"] = (
+        checkpoint_pd["forward_escape_count"].fillna(0).astype(int)
+    )
+    checkpoint_pd["last5_pressure_count"] = (
+        checkpoint_pd["last5_pressure_count"].fillna(0).astype(int)
+    )
 
     # Calculate derived features
     checkpoint_pd["pressure_per_min"] = checkpoint_pd["cumul_pressure_count"] / np.maximum(
@@ -289,9 +308,7 @@ def add_pressure_intensity_features(
     return checkpoint_pd
 
 
-def add_position_context_features(
-    checkpoint_df: DataFrame, use_gpu: bool = False
-) -> DataFrame:
+def add_position_context_features(checkpoint_df: DataFrame, use_gpu: bool = False) -> DataFrame:
     """
     Add position-specific contextual features.
 
@@ -321,9 +338,9 @@ def add_position_context_features(
     ).astype(int)
 
     # Defender under pressure (danger sign)
-    df["defender_under_pressure"] = (
-        df["is_defender"] * (df["cumul_press_quality"] < 0)
-    ).astype(int)
+    df["defender_under_pressure"] = (df["is_defender"] * (df["cumul_press_quality"] < 0)).astype(
+        int
+    )
 
     # Late game attacker (high scoring probability)
     df["late_game_attacker"] = (df["is_attacker"] * df["is_late_game"]).astype(int)
@@ -338,9 +355,7 @@ def add_position_context_features(
     return df
 
 
-def add_interaction_features(
-    checkpoint_df: DataFrame, use_gpu: bool = False
-) -> DataFrame:
+def add_interaction_features(checkpoint_df: DataFrame, use_gpu: bool = False) -> DataFrame:
     """
     Add non-linear interactions between top features.
     """
@@ -388,9 +403,7 @@ def add_all_advanced_features(
     checkpoint_df = add_temporal_trends(checkpoint_df, use_gpu)
 
     print("Adding pressure intensity features...")
-    checkpoint_df = add_pressure_intensity_features(
-        checkpoint_df, event_dfs["pressure"], use_gpu
-    )
+    checkpoint_df = add_pressure_intensity_features(checkpoint_df, event_dfs["pressure"], use_gpu)
 
     print("Adding position context features...")
     checkpoint_df = add_position_context_features(checkpoint_df, use_gpu)

@@ -1,0 +1,130 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\title{WEC2026 Goal-Scoring Prediction: Data, Preprocessing, and Modeling Report}
+\author{Automated experiment report}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Executive Summary}
+The task is a rare-event binary classification problem: predicting whether a player scores after a match checkpoint.
+The modeling table contains 3,486 checkpoint observations, 203 positives (5.82%), 31 fixtures, and 869 player appearances.
+The best grouped cross-validated model in this run was \textbf{catboost} on \textbf{all\_features} features with ROC-AUC 0.676, PR-AUC 0.124, and balanced accuracy 0.640.
+AutoGluon was not available in this run.
+
+\section{Data Audit}
+The checkpoint file provides player state every 15 minutes, including position, home status, formation, substitution times, physical load, shots, and the target \texttt{scored\_after}.
+Four event files were joined using \texttt{player\_appearance\_id} and absolute match time: passes, high-speed runs/sprints, shots, and actions under defensive pressure.
+The target is highly imbalanced; therefore ROC-AUC, PR-AUC, balanced accuracy, Brier score, and log loss are more informative than raw accuracy.
+
+\section{Preprocessing}
+All event-derived features were computed with temporal filters:
+\[
+  \texttt{minute\_in} \leq \texttt{event\_abs\_minute} \leq \texttt{checkpoint\_abs\_minute}.
+\]
+The implementation converts period-relative minutes to absolute match minutes so second-half and extra-time checkpoints are handled correctly.
+Reference quantities such as expected-threat zone values, pressure turnover baselines, and positional baselines were fitted inside each cross-validation training fold before being applied to validation checkpoints.
+Categorical variables were one-hot encoded from training folds only, and numerical missing values were median-imputed from training folds only.
+
+\section{Feature Families}
+The all-feature model uses signals from every available file:
+physical intensity and shots from \texttt{players\_quarters\_final.csv}, run event intensity from \texttt{player\_appearance\_run.csv}, pass volume and xT proxies from \texttt{player\_appearance\_pass.csv}, shot context from \texttt{player\_appearance\_shot\_limited.csv}, and pressure resistance plus pressing-applied metrics from \texttt{player\_appearance\_behaviour\_under\_pressure.csv}.
+Recent-vs-cumulative ratios were included to test short-term intensity surges.
+
+\section{Model Selection and HPO}
+The benchmark used fixture-grouped stratified cross-validation to prevent match-level leakage.
+Models attempted in this practical run included logistic regression, ExtraTrees, RandomForest, XGBoost, CatBoost, LightGBM, TabPFN, stacking, and optional AutoGluon.
+TabPFN probabilities were included as a base learner in the stacked ensemble whenever the package was available, rather than being evaluated only as a standalone benchmark.
+Skipped or unavailable models: tabpfn: TabPFN requires a one-time license acceptance to download.
+XGBoost used Optuna HPO when the requested trial budget was nonzero; other model parameters were conservative regularized defaults appropriate for the small sample size.
+
+\section{Grouped Cross-Validated Results}
+\begin{longtable}{llrrrrr}
+\toprule
+Model & Feature set & ROC-AUC & PR-AUC & Bal. Acc. & F1 & Brier \\
+\midrule
+catboost & all\_features & 0.676 & 0.124 & 0.640 & 0.206 & 0.181 \\
+stacked & all\_features & 0.671 & 0.121 & 0.630 & 0.177 & 0.054 \\
+xgboost & all\_features & 0.692 & 0.120 & 0.500 & 0.000 & 0.061 \\
+extra\_trees & all\_features & 0.668 & 0.117 & 0.500 & 0.000 & 0.061 \\
+xgboost & base\_checkpoint & 0.677 & 0.112 & 0.500 & 0.000 & 0.062 \\
+xgboost & base\_plus\_passing & 0.674 & 0.112 & 0.500 & 0.000 & 0.062 \\
+xgboost & cumulative\_only & 0.643 & 0.111 & 0.506 & 0.028 & 0.069 \\
+xgboost & base\_plus\_pressure & 0.662 & 0.107 & 0.500 & 0.000 & 0.062 \\
+logistic & all\_features & 0.619 & 0.100 & 0.589 & 0.150 & 0.197 \\
+xgboost & recent\_only & 0.637 & 0.092 & 0.500 & 0.000 & 0.068 \\
+xgboost & sprints\_shots & 0.618 & 0.085 & 0.504 & 0.026 & 0.081 \\
+xgboost & external\_context & 0.552 & 0.074 & 0.547 & 0.131 & 0.167 \\
+\bottomrule
+\end{longtable}
+
+\section{AutoGluon Holdout Result}
+\begin{longtable}{llrrrrr}
+\toprule
+Model & Feature set & ROC-AUC & PR-AUC & Bal. Acc. & F1 & Brier \\
+\midrule
+No AutoGluon holdout result was recorded. \\
+\bottomrule
+\end{longtable}
+
+\section{Ablation Results}
+\begin{longtable}{lrrrr}
+\toprule
+Feature set & ROC-AUC & PR-AUC & Bal. Acc. & F1 \\
+\midrule
+all\_features & 0.692 & 0.120 & 0.500 & 0.000 \\
+base\_checkpoint & 0.677 & 0.112 & 0.500 & 0.000 \\
+base\_plus\_passing & 0.674 & 0.112 & 0.500 & 0.000 \\
+cumulative\_only & 0.643 & 0.111 & 0.506 & 0.028 \\
+base\_plus\_pressure & 0.662 & 0.107 & 0.500 & 0.000 \\
+recent\_only & 0.637 & 0.092 & 0.500 & 0.000 \\
+sprints\_shots & 0.618 & 0.085 & 0.504 & 0.026 \\
+external\_context & 0.552 & 0.074 & 0.547 & 0.131 \\
+\bottomrule
+\end{longtable}
+
+\section{Feature Importance}
+\begin{longtable}{lr}
+\toprule
+Feature & PR-AUC drop after permutation \\
+\midrule
+cumul\_pass\_bottom\_share & 0.016 \\
+cumul\_pressure\_quality & 0.006 \\
+is\_defender & 0.004 \\
+cumul\_pressure\_top\_share & 0.004 \\
+last15\_pass\_bottom\_share & 0.004 \\
+cumul\_pass\_top\_share & 0.003 \\
+cumul\_pass\_count & 0.002 \\
+cumul\_pass\_receiver\_diversity & 0.001 \\
+last15\_pass\_top\_share & 0.001 \\
+checkpoint\_abs\_min & 0.001 \\
+cumul\_positive\_xt\_count & 0.001 \\
+recent\_hsr\_ratio & 0.001 \\
+\bottomrule
+\end{longtable}
+
+\section{Research Questions}
+\paragraph{RQ1.}
+Player behaviour during a match is predictive but noisy because goals are rare. In this run the best grouped-CV model reached ROC-AUC 0.676, PR-AUC 0.124, and balanced accuracy 0.640.
+\paragraph{RQ2.}
+The strongest determinants are identified by a combination of ablation deltas and permutation importance. The leading stable signals in this run were: cumul\_pass\_bottom\_share, cumul\_pressure\_quality, is\_defender, cumul\_pressure\_top\_share, last15\_pass\_bottom\_share, cumul\_pass\_top\_share.
+\paragraph{RQ3.}
+The sprint-and-shot-only ablation should be compared against the all-feature model. Its result in this run was 0.085 PR-AUC, so it is not assumed sufficient unless it matches the all-feature score.
+\paragraph{RQ4.}
+Passing and pressure data are useful when their ablation improves over the base checkpoint model. The report tables show whether \texttt{base\_plus\_passing} and \texttt{base\_plus\_pressure} improve ROC-AUC/PR-AUC/balanced accuracy.
+\paragraph{RQ5.}
+The \texttt{recent\_only} and \texttt{cumulative\_only} ablations compare short-term and accumulated performance. The stronger family is the one with higher grouped-CV PR-AUC and ROC-AUC.
+\paragraph{RQ6.}
+Recent-vs-cumulative ratios and intensity-surge interactions directly test whether short-term intensity above a player's own baseline increases scoring probability.
+\paragraph{RQ7.}
+External factors were modeled through home status, period, checkpoint time, extra time, formation, position, and substitution context. Their influence is assessed by the \texttt{external\_context} ablation and permutation importance.
+
+\section{Limitations}
+Only 203 positive examples are available, so fold-level variance is expected. Some event locations are coarse three-zone labels, which limits xT precision. The stacked model is evaluated with grouped OOF meta-predictions, but it should still be validated on a hidden competition set before final claims.
+
+\end{document}

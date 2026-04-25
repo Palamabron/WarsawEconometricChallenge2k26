@@ -2,9 +2,7 @@
 Tests for preprocessing utilities.
 """
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from src.preprocessing import CategoricalEncoder
 

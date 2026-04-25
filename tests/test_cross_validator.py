@@ -4,7 +4,7 @@ Tests for cross-validation utilities.
 
 import pandas as pd
 
-from src.validation.cross_validator import CrossValidator
+from src.validation.cross_validator import FixtureGroupKFold
 
 
 class TestCrossValidator:
@@ -19,7 +19,7 @@ class TestCrossValidator:
             }
         )
 
-        cv = CrossValidator(n_splits=2, stratify=False, shuffle=False)
+        cv = FixtureGroupKFold(n_splits=2, stratify=False, shuffle=False)
 
         X = data.drop(columns=["fixture_id", "target"])
         y = data["target"]

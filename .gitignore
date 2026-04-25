@@ -75,6 +75,3 @@ catboost_info/
 *.h5
 *.pt
 *.pth
-
-# Large data files (already in data/)
-# data/*.csv  # Uncomment if you want to track data files separately

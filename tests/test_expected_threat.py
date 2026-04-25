@@ -4,9 +4,18 @@ Tests for Expected Threat (xT) feature engineering.
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.features.expected_threat import aggregate_xt_features
+
+
+class PrecomputedThreatCalculator:
+    """Test double for aggregation with already prepared threat values."""
+
+    @staticmethod
+    def calculate_threat_added(pass_df):
+        df = pass_df.copy()
+        df["threat_added"] = df["xt_added"]
+        return df
 
 
 class TestAggregateXTFeatures:
@@ -32,7 +41,7 @@ class TestAggregateXTFeatures:
             }
         )
 
-        result = aggregate_xt_features(checkpoint_data, pass_data)
+        result = aggregate_xt_features(pass_data, checkpoint_data, PrecomputedThreatCalculator())
 
         # Should include passes at minute 5, 12 (not 25)
         assert result["cumul_xt_count"].iloc[0] == 2

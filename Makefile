@@ -1,4 +1,4 @@
-.PHONY: help install install-dev install-gpu format lint type-check test test-cov clean all
+.PHONY: help install install-dev install-gpu format fmt lint type-check types test test-cov clean all
 
 help:
 	@echo "Warsaw Econometric Challenge 2026 - Makefile Commands"
@@ -33,6 +33,8 @@ format:
 	ruff format src/ tests/
 	ruff check --fix src/ tests/
 
+fmt: format
+
 lint:
 	@echo "Linting code with ruff..."
 	ruff check src/ tests/
@@ -40,6 +42,8 @@ lint:
 type-check:
 	@echo "Type checking with mypy..."
 	mypy src/
+
+types: type-check
 
 test:
 	@echo "Running tests..."

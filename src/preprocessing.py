@@ -20,7 +20,9 @@ class CategoricalEncoder:
         self.encoders: dict[str, LabelEncoder] = {}
         self.fitted: bool = False
 
-    def fit(self, df: pd.DataFrame, categorical_cols: list[str] | None = None) -> "CategoricalEncoder":
+    def fit(
+        self, df: pd.DataFrame, categorical_cols: list[str] | None = None
+    ) -> "CategoricalEncoder":
         """
         Fit encoders on training data.
 
@@ -66,13 +68,17 @@ class CategoricalEncoder:
         for col, encoder in self.encoders.items():
             if col in df.columns:
                 # Handle unseen categories by mapping to -1
-                df[col] = df[col].astype(str).map(
-                    lambda x: encoder.transform([x])[0] if x in encoder.classes_ else -1
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .map(lambda x: encoder.transform([x])[0] if x in encoder.classes_ else -1)
                 )
 
         return df
 
-    def fit_transform(self, df: pd.DataFrame, categorical_cols: list[str] | None = None) -> pd.DataFrame:
+    def fit_transform(
+        self, df: pd.DataFrame, categorical_cols: list[str] | None = None
+    ) -> pd.DataFrame:
         """
         Fit encoders and transform in one step.
 
