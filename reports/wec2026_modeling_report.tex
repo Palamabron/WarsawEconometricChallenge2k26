@@ -14,8 +14,8 @@
 \section{Executive Summary}
 The task is a rare-event binary classification problem: predicting whether a player scores after a match checkpoint.
 The modeling table contains 3,486 checkpoint observations, 203 positives (5.82%), 31 fixtures, and 869 player appearances.
-The best grouped cross-validated model in this run was \textbf{catboost} on \textbf{all\_features} features with ROC-AUC 0.676, PR-AUC 0.124, and balanced accuracy 0.640.
-AutoGluon was not available in this run.
+The best grouped cross-validated model in this run was \textbf{xgboost} on \textbf{all\_features} features with ROC-AUC 0.643, PR-AUC 0.135, and balanced accuracy 0.587.
+AutoGluon holdout benchmark reached ROC-AUC 0.668, PR-AUC 0.156, and balanced accuracy 0.545 at threshold 0.5 on its validation fold.
 
 \section{Data Audit}
 The checkpoint file provides player state every 15 minutes, including position, home status, formation, substitution times, physical load, shots, and the target \texttt{scored\_after}.
@@ -48,18 +48,20 @@ XGBoost used Optuna HPO when the requested trial budget was nonzero; other model
 \toprule
 Model & Feature set & ROC-AUC & PR-AUC & Bal. Acc. & F1 & Brier \\
 \midrule
-catboost & all\_features & 0.676 & 0.124 & 0.640 & 0.206 & 0.181 \\
-stacked & all\_features & 0.671 & 0.121 & 0.630 & 0.177 & 0.054 \\
-xgboost & all\_features & 0.692 & 0.120 & 0.500 & 0.000 & 0.061 \\
-extra\_trees & all\_features & 0.668 & 0.117 & 0.500 & 0.000 & 0.061 \\
-xgboost & base\_checkpoint & 0.677 & 0.112 & 0.500 & 0.000 & 0.062 \\
-xgboost & base\_plus\_passing & 0.674 & 0.112 & 0.500 & 0.000 & 0.062 \\
-xgboost & cumulative\_only & 0.643 & 0.111 & 0.506 & 0.028 & 0.069 \\
-xgboost & base\_plus\_pressure & 0.662 & 0.107 & 0.500 & 0.000 & 0.062 \\
-logistic & all\_features & 0.619 & 0.100 & 0.589 & 0.150 & 0.197 \\
-xgboost & recent\_only & 0.637 & 0.092 & 0.500 & 0.000 & 0.068 \\
-xgboost & sprints\_shots & 0.618 & 0.085 & 0.504 & 0.026 & 0.081 \\
-xgboost & external\_context & 0.552 & 0.074 & 0.547 & 0.131 & 0.167 \\
+xgboost & all\_features & 0.643 & 0.135 & 0.587 & 0.189 & 0.117 \\
+catboost & all\_features & 0.657 & 0.125 & 0.613 & 0.187 & 0.171 \\
+random\_forest & all\_features & 0.691 & 0.120 & 0.500 & 0.000 & 0.058 \\
+lightgbm & all\_features & 0.668 & 0.118 & 0.500 & 0.000 & 0.062 \\
+extra\_trees & all\_features & 0.668 & 0.112 & 0.500 & 0.000 & 0.061 \\
+xgboost & base\_plus\_pressure & 0.661 & 0.111 & 0.500 & 0.000 & 0.064 \\
+xgboost & base\_checkpoint & 0.660 & 0.108 & 0.500 & 0.000 & 0.065 \\
+xgboost & base\_plus\_passing & 0.656 & 0.107 & 0.502 & 0.010 & 0.065 \\
+logistic & all\_features & 0.599 & 0.098 & 0.577 & 0.144 & 0.199 \\
+stacked & all\_features & 0.569 & 0.098 & 0.575 & 0.137 & 0.055 \\
+xgboost & recent\_only & 0.647 & 0.096 & 0.504 & 0.019 & 0.069 \\
+xgboost & cumulative\_only & 0.635 & 0.096 & 0.503 & 0.018 & 0.071 \\
+xgboost & external\_context & 0.631 & 0.082 & 0.554 & 0.137 & 0.153 \\
+xgboost & sprints\_shots & 0.584 & 0.069 & 0.499 & 0.016 & 0.089 \\
 \bottomrule
 \end{longtable}
 
@@ -68,7 +70,7 @@ xgboost & external\_context & 0.552 & 0.074 & 0.547 & 0.131 & 0.167 \\
 \toprule
 Model & Feature set & ROC-AUC & PR-AUC & Bal. Acc. & F1 & Brier \\
 \midrule
-No AutoGluon holdout result was recorded. \\
+autogluon\_holdout & all\_features & 0.668 & 0.156 & 0.545 & 0.154 & 0.019 \\
 \bottomrule
 \end{longtable}
 
@@ -77,14 +79,14 @@ No AutoGluon holdout result was recorded. \\
 \toprule
 Feature set & ROC-AUC & PR-AUC & Bal. Acc. & F1 \\
 \midrule
-all\_features & 0.692 & 0.120 & 0.500 & 0.000 \\
-base\_checkpoint & 0.677 & 0.112 & 0.500 & 0.000 \\
-base\_plus\_passing & 0.674 & 0.112 & 0.500 & 0.000 \\
-cumulative\_only & 0.643 & 0.111 & 0.506 & 0.028 \\
-base\_plus\_pressure & 0.662 & 0.107 & 0.500 & 0.000 \\
-recent\_only & 0.637 & 0.092 & 0.500 & 0.000 \\
-sprints\_shots & 0.618 & 0.085 & 0.504 & 0.026 \\
-external\_context & 0.552 & 0.074 & 0.547 & 0.131 \\
+all\_features & 0.643 & 0.135 & 0.587 & 0.189 \\
+base\_plus\_pressure & 0.661 & 0.111 & 0.500 & 0.000 \\
+base\_checkpoint & 0.660 & 0.108 & 0.500 & 0.000 \\
+base\_plus\_passing & 0.656 & 0.107 & 0.502 & 0.010 \\
+recent\_only & 0.647 & 0.096 & 0.504 & 0.019 \\
+cumulative\_only & 0.635 & 0.096 & 0.503 & 0.018 \\
+external\_context & 0.631 & 0.082 & 0.554 & 0.137 \\
+sprints\_shots & 0.584 & 0.069 & 0.499 & 0.016 \\
 \bottomrule
 \end{longtable}
 
@@ -93,28 +95,28 @@ external\_context & 0.552 & 0.074 & 0.547 & 0.131 \\
 \toprule
 Feature & PR-AUC drop after permutation \\
 \midrule
-cumul\_pass\_bottom\_share & 0.016 \\
-cumul\_pressure\_quality & 0.006 \\
-is\_defender & 0.004 \\
-cumul\_pressure\_top\_share & 0.004 \\
-last15\_pass\_bottom\_share & 0.004 \\
-cumul\_pass\_top\_share & 0.003 \\
-cumul\_pass\_count & 0.002 \\
-cumul\_pass\_receiver\_diversity & 0.001 \\
-last15\_pass\_top\_share & 0.001 \\
-checkpoint\_abs\_min & 0.001 \\
-cumul\_positive\_xt\_count & 0.001 \\
-recent\_hsr\_ratio & 0.001 \\
+jersey\_number & 0.041 \\
+cumul\_pass\_bottom\_share & 0.036 \\
+cumul\_pressure\_quality & 0.034 \\
+recent\_distance\_ratio & 0.034 \\
+cumul\_pressure\_top\_share & 0.034 \\
+is\_defender & 0.033 \\
+last15\_pass\_bottom\_share & 0.033 \\
+cumul\_pass\_top\_share & 0.032 \\
+cumul\_pressure\_turnover\_rate & 0.032 \\
+cumul\_positive\_xt\_count & 0.032 \\
+recent\_hsr\_ratio & 0.031 \\
+cumul\_pass\_count & 0.031 \\
 \bottomrule
 \end{longtable}
 
 \section{Research Questions}
 \paragraph{RQ1.}
-Player behaviour during a match is predictive but noisy because goals are rare. In this run the best grouped-CV model reached ROC-AUC 0.676, PR-AUC 0.124, and balanced accuracy 0.640.
+Player behaviour during a match is predictive but noisy because goals are rare. In this run the best grouped-CV model reached ROC-AUC 0.643, PR-AUC 0.135, and balanced accuracy 0.587.
 \paragraph{RQ2.}
-The strongest determinants are identified by a combination of ablation deltas and permutation importance. The leading stable signals in this run were: cumul\_pass\_bottom\_share, cumul\_pressure\_quality, is\_defender, cumul\_pressure\_top\_share, last15\_pass\_bottom\_share, cumul\_pass\_top\_share.
+The strongest determinants are identified by a combination of ablation deltas and permutation importance. The leading stable signals in this run were: jersey\_number, cumul\_pass\_bottom\_share, cumul\_pressure\_quality, recent\_distance\_ratio, cumul\_pressure\_top\_share, is\_defender.
 \paragraph{RQ3.}
-The sprint-and-shot-only ablation should be compared against the all-feature model. Its result in this run was 0.085 PR-AUC, so it is not assumed sufficient unless it matches the all-feature score.
+The sprint-and-shot-only ablation should be compared against the all-feature model. Its result in this run was 0.069 PR-AUC, so it is not assumed sufficient unless it matches the all-feature score.
 \paragraph{RQ4.}
 Passing and pressure data are useful when their ablation improves over the base checkpoint model. The report tables show whether \texttt{base\_plus\_passing} and \texttt{base\_plus\_pressure} improve ROC-AUC/PR-AUC/balanced accuracy.
 \paragraph{RQ5.}
