@@ -43,12 +43,15 @@ from sklearn.metrics import (
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.preprocessing import StandardScaler
 
+from src.config import get_config
 from src.temporal_features import (
     REDUNDANT_MODEL_FEATURES,
     TARGET_COL,
     TemporalFeatureBuilder,
     modeling_columns,
+    prepare_checkpoint_frame,
 )
+from src.validation.leakage_checks import LeakageValidator
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -61,7 +64,7 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs" / "experiments" / "wec_modeling_upgrade"
 MODEL_DIR = PROJECT_ROOT / "outputs" / "models" / "wec_modeling_upgrade"
 REPORT_PATH = PROJECT_ROOT / "reports" / "wec2026_modeling_report.tex"
 CACHE_DIR = PROJECT_ROOT / ".cache" / "ml"
-CSV_READ_KWARGS = {
+CSV_READ_KWARGS: dict[str, Any] = {
     "true_values": ["TRUE"],
     "false_values": ["FALSE"],
     "na_values": ["NULL", ""],
@@ -92,9 +95,10 @@ class ExperimentArgs:
 
     preset: Literal["smoke", "practical"] = "practical"
     hpo_trials: int | None = None
-    folds: int = 5
+    folds: int | None = None
     include_autogluon: bool = False
     autogluon_time_limit: int = 900
+    config_path: str = "config.yaml"
     log_level: str = "INFO"
 
 
@@ -123,26 +127,44 @@ def detect_cuda() -> bool:
         return False
 
 
-def load_data() -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+def load_data(data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Load all raw CSV files."""
     checkpoint = pd.read_csv(
-        DATA_DIR / "players_quarters_final.csv",
+        data_dir / "players_quarters_final.csv",
         parse_dates=["date"],
         **CSV_READ_KWARGS,
     )
     event_dfs = {
-        "pass": pd.read_csv(DATA_DIR / "player_appearance_pass.csv", **CSV_READ_KWARGS),
-        "run": pd.read_csv(DATA_DIR / "player_appearance_run.csv", **CSV_READ_KWARGS),
+        "pass": pd.read_csv(data_dir / "player_appearance_pass.csv", **CSV_READ_KWARGS),
+        "run": pd.read_csv(data_dir / "player_appearance_run.csv", **CSV_READ_KWARGS),
         "shot": pd.read_csv(
-            DATA_DIR / "player_appearance_shot_limited.csv",
+            data_dir / "player_appearance_shot_limited.csv",
             **CSV_READ_KWARGS,
         ),
         "pressure": pd.read_csv(
-            DATA_DIR / "player_appearance_behaviour_under_pressure.csv",
+            data_dir / "player_appearance_behaviour_under_pressure.csv",
             **CSV_READ_KWARGS,
         ),
     }
     return checkpoint, event_dfs
+
+
+def validate_training_checkpoints(
+    checkpoint_df: pd.DataFrame,
+    event_dfs: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Run report-path leakage checks and keep only checkpoint-valid training rows."""
+    prepared = prepare_checkpoint_frame(checkpoint_df)
+    LeakageValidator.validate_temporal_boundaries(prepared, checkpoint_df, event_dfs)
+
+    on_pitch_mask = prepared["is_on_pitch"].eq(1)
+    dropped = int((~on_pitch_mask).sum())
+    if dropped:
+        logger.warning("Dropping %s checkpoints where the player is not on pitch", dropped)
+    filtered = checkpoint_df.loc[on_pitch_mask].reset_index(drop=True)
+    if filtered.empty:
+        raise ValueError("No valid on-pitch checkpoints remain after training input validation.")
+    return filtered
 
 
 def dataframe_audit(df: pd.DataFrame, max_category_examples: int = 12) -> dict[str, Any]:
@@ -197,8 +219,13 @@ def build_data_audit(
 
 
 def make_cv(y: pd.Series, groups: pd.Series, n_splits: int = 5) -> StratifiedGroupKFold:
-    if groups.nunique() < n_splits:
-        n_splits = int(groups.nunique())
+    n_groups = int(groups.nunique())
+    if n_groups < 2:
+        raise ValueError("Grouped CV requires at least 2 distinct fixture_id values.")
+    if y.nunique() < 2:
+        raise ValueError("Training requires both target classes before grouped CV.")
+    if n_groups < n_splits:
+        n_splits = n_groups
     return StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
 
@@ -354,12 +381,12 @@ def ranked_precision_recall_at_k(
 
 
 def evaluate_predictions(
-    y_true: np.ndarray,
-    y_proba: np.ndarray,
+    y_true: Any,
+    y_proba: Any,
     model: str,
     feature_set: str,
     threshold: float | None = None,
-    y_pred: np.ndarray | None = None,
+    y_pred: Any | None = None,
 ) -> dict[str, Any]:
     y_true = np.asarray(y_true).astype(int)
     y_proba = np.asarray(y_proba).astype(float)
@@ -369,6 +396,7 @@ def evaluate_predictions(
         y_pred = (y_proba >= threshold).astype(int)
     elif threshold is None:
         threshold = float("nan")
+    y_pred = np.asarray(y_pred).astype(int)
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
     precision = tp / max(tp + fp, 1)
     precision_at_5, recall_at_5, k5 = ranked_precision_recall_at_k(y_true, y_proba, 0.05)
@@ -902,6 +930,12 @@ def write_report(
     """Write the final LaTeX report."""
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     cv_metrics = metrics[~metrics["model"].str.contains("autogluon", case=False, na=False)].copy()
+    if cv_metrics.empty:
+        skipped = "; ".join(str(item).splitlines()[0] for item in skipped_models) or "none recorded"
+        raise ValueError(
+            "Cannot write modeling report because no grouped-CV model metrics were produced. "
+            f"Skipped models: {skipped}"
+        )
     best = cv_metrics.sort_values(["pr_auc", "roc_auc", "balanced_accuracy"], ascending=False).iloc[
         0
     ]
@@ -1097,15 +1131,18 @@ def run_experiment(args: ExperimentArgs) -> None:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+    config = get_config(args.config_path)
+    data_dir = PROJECT_ROOT / str(config.get("data.data_dir", "data"))
     use_gpu = detect_cuda()
     hpo_trials = args.hpo_trials
     if hpo_trials is None:
         hpo_trials = 1 if args.preset == "smoke" else 12
-    n_splits = args.folds
+    n_splits = int(args.folds or config.n_folds)
     if args.preset == "smoke":
         n_splits = min(n_splits, 3)
 
-    checkpoint_df, event_dfs = load_data()
+    checkpoint_df, event_dfs = load_data(data_dir)
+    checkpoint_df = validate_training_checkpoints(checkpoint_df, event_dfs)
     y = checkpoint_df[TARGET_COL].astype(int).reset_index(drop=True)
     data_summary = {
         "n_rows": len(checkpoint_df),
@@ -1230,11 +1267,13 @@ def run_experiment(args: ExperimentArgs) -> None:
         .drop_duplicates(subset=["model", "feature_set"], keep="first")
         .sort_values(["pr_auc", "roc_auc"], ascending=False)
     )
-    fold_metrics = pd.DataFrame(fold_rows)
+    fold_metrics_df = pd.DataFrame(fold_rows)
     oof_predictions = pd.DataFrame(oof_columns)
-    oof_predictions.insert(0, "checkpoint", checkpoint_df["checkpoint"].values)
-    oof_predictions.insert(0, "fixture_id", checkpoint_df["fixture_id"].values)
-    oof_predictions.insert(0, "player_appearance_id", checkpoint_df["player_appearance_id"].values)
+    oof_predictions.insert(0, "checkpoint", checkpoint_df["checkpoint"].to_numpy())
+    oof_predictions.insert(0, "fixture_id", checkpoint_df["fixture_id"].to_numpy())
+    oof_predictions.insert(
+        0, "player_appearance_id", checkpoint_df["player_appearance_id"].to_numpy()
+    )
 
     if all_oof_for_stack:
         importance_model = max(
@@ -1267,7 +1306,7 @@ def run_experiment(args: ExperimentArgs) -> None:
         )
 
     metrics.to_csv(OUTPUT_DIR / "metrics.csv", index=False)
-    fold_metrics.to_csv(OUTPUT_DIR / "fold_metrics.csv", index=False)
+    fold_metrics_df.to_csv(OUTPUT_DIR / "fold_metrics.csv", index=False)
     oof_predictions.to_csv(OUTPUT_DIR / "oof_predictions.csv", index=False)
     importances.to_csv(OUTPUT_DIR / "feature_importance.csv", index=False)
     with (OUTPUT_DIR / "run_summary.json").open("w") as f:
@@ -1290,7 +1329,7 @@ def run_experiment(args: ExperimentArgs) -> None:
     joblib.dump(saved_models, MODEL_DIR / "fold_models.joblib")
     write_report(
         metrics,
-        fold_metrics,
+        fold_metrics_df,
         importances,
         data_summary,
         skipped_models,

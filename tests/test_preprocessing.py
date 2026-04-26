@@ -8,6 +8,7 @@ import pandas as pd
 from run_experiment import FoldArtifacts, feature_matrix
 from scripts.analyze_ensemble_explainability import encoded_fold_matrices
 from src.preprocessing import CategoricalEncoder
+from src.temporal_features import TemporalFeatureBuilder
 
 
 class TestCategoricalEncoder:
@@ -92,7 +93,7 @@ def test_explainability_fold_matrices_include_target_encoded_columns():
         val_features=val,
         train_idx=np.arange(len(train)),
         val_idx=np.arange(len(val)),
-        builder=object(),
+        builder=TemporalFeatureBuilder(),
     )
 
     x_train, x_val = encoded_fold_matrices([fold], ["formation", "numeric"])[0]

@@ -13,6 +13,7 @@ dependencies = [
     "tabpfn>=0.2.0",
     "autogluon.tabular>=1.2.0",
     "optuna>=3.5.0",
+    "pydantic>=2.0.0",
     "pyyaml>=6.0",
     "jupyter>=1.0.0",
     "matplotlib>=3.7.0",
@@ -102,7 +103,10 @@ module = [
     "cuml.*",
     "xgboost.*",
     "catboost.*",
+    "autogluon.*",
+    "joblib.*",
     "sklearn.*",
+    "shap.*",
     "tabpfn.*",
     "optuna.*",
 ]

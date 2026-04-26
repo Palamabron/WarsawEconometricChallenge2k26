@@ -1,0 +1,429 @@
+{
+  "data_summary": {
+    "n_rows": 3486,
+    "n_positives": 203,
+    "positive_rate": 0.05823293172690763,
+    "n_fixtures": 31,
+    "n_appearances": 869
+  },
+  "use_gpu": true,
+  "preset": "practical",
+  "hpo_trials": 50,
+  "folds": 5,
+  "feature_counts": {
+    "base_checkpoint": 144,
+    "sprints_shots": 83,
+    "base_plus_passing": 163,
+    "base_plus_pressure": 169,
+    "recent_only": 136,
+    "cumulative_only": 65,
+    "external_context": 9,
+    "all_features": 241
+  },
+  "data_audit": {
+    "raw": {
+      "checkpoint": {
+        "n_rows": 3486,
+        "n_cols": 33,
+        "dtypes": {
+          "player_appearance_id": "int64",
+          "player_id": "int64",
+          "fixture_id": "int64",
+          "date": "datetime64[ns]",
+          "checkpoint": "object",
+          "checkpoint_period": "object",
+          "checkpoint_min": "int64",
+          "position": "object",
+          "is_home": "bool",
+          "formation": "object",
+          "minute_in": "int64",
+          "minute_out": "int64",
+          "subbed": "bool",
+          "jersey_number": "int64",
+          "last15_sprints": "int64",
+          "last15_hsr": "int64",
+          "last15_distance": "float64",
+          "last15_mean_max_speed": "float64",
+          "last15_peak_speed": "float64",
+          "last15_shots": "int64",
+          "last15_shots_on_target": "int64",
+          "last15_shots_under_press": "int64",
+          "last15_shots_top_third": "int64",
+          "cumul_sprints": "int64",
+          "cumul_hsr": "int64",
+          "cumul_distance": "float64",
+          "cumul_mean_max_speed": "float64",
+          "cumul_peak_speed": "float64",
+          "cumul_shots": "int64",
+          "cumul_shots_on_target": "int64",
+          "cumul_shots_under_press": "int64",
+          "cumul_shots_top_third": "int64",
+          "scored_after": "int64"
+        },
+        "missing_counts": {},
+        "categorical": {
+          "checkpoint": {
+            "n_unique": 7,
+            "top_values": {
+              "H1_15": 681,
+              "H1_30": 680,
+              "H1_45": 680,
+              "H2_15": 680,
+              "H2_30": 680,
+              "H2_45": 43,
+              "ET1_15": 42
+            }
+          },
+          "checkpoint_period": {
+            "n_unique": 3,
+            "top_values": {
+              "half_1": 2041,
+              "half_2": 1403,
+              "extra_time_1": 42
+            }
+          },
+          "position": {
+            "n_unique": 4,
+            "top_values": {
+              "M": 1307,
+              "D": 1246,
+              "A": 615,
+              "G": 318
+            }
+          },
+          "is_home": {
+            "n_unique": 2,
+            "top_values": {
+              "True": 1744,
+              "False": 1742
+            }
+          },
+          "formation": {
+            "n_unique": 10,
+            "top_values": {
+              "4-2-3-1": 953,
+              "4-3-3": 825,
+              "4-4-2": 539,
+              "4-1-4-1": 490,
+              "3-4-3": 330,
+              "5-4-1": 110,
+              "3-4-2-1": 74,
+              "4-1-3-2": 55,
+              "5-2-3": 55,
+              "4-2-4": 55
+            }
+          },
+          "subbed": {
+            "n_unique": 2,
+            "top_values": {
+              "False": 2228,
+              "True": 1258
+            }
+          }
+        }
+      },
+      "pass": {
+        "n_rows": 29795,
+        "n_cols": 7,
+        "dtypes": {
+          "id": "int64",
+          "period": "object",
+          "player_appearance_id": "int64",
+          "addressee_player_appearance_id": "float64",
+          "accurate": "bool",
+          "minute": "int64",
+          "stage": "object"
+        },
+        "missing_counts": {
+          "addressee_player_appearance_id": 41,
+          "stage": 57
+        },
+        "categorical": {
+          "period": {
+            "n_unique": 4,
+            "top_values": {
+              "half_1": 15708,
+              "half_2": 13488,
+              "extra_time_1": 308,
+              "extra_time_2": 291
+            }
+          },
+          "accurate": {
+            "n_unique": 2,
+            "top_values": {
+              "True": 24961,
+              "False": 4834
+            }
+          },
+          "stage": {
+            "n_unique": 4,
+            "top_values": {
+              "middle": 14369,
+              "bottom": 8733,
+              "top": 6636,
+              "missing": 57
+            }
+          }
+        }
+      },
+      "run": {
+        "n_rows": 35133,
+        "n_cols": 10,
+        "dtypes": {
+          "id": "int64",
+          "period": "object",
+          "stage": "object",
+          "possession": "int64",
+          "run_type": "object",
+          "minute": "int64",
+          "min_speed": "float64",
+          "max_speed": "float64",
+          "distance": "float64",
+          "player_appearance_id": "int64"
+        },
+        "missing_counts": {},
+        "categorical": {
+          "period": {
+            "n_unique": 4,
+            "top_values": {
+              "half_2": 17519,
+              "half_1": 17045,
+              "extra_time_1": 295,
+              "extra_time_2": 274
+            }
+          },
+          "stage": {
+            "n_unique": 3,
+            "top_values": {
+              "middle": 14874,
+              "top": 10671,
+              "bottom": 9588
+            }
+          },
+          "run_type": {
+            "n_unique": 2,
+            "top_values": {
+              "hsr": 28417,
+              "sprint": 6716
+            }
+          }
+        }
+      },
+      "shot": {
+        "n_rows": 780,
+        "n_cols": 12,
+        "dtypes": {
+          "id": "int64",
+          "period": "object",
+          "player_appearance_id": "int64",
+          "body_part": "object",
+          "technique": "object",
+          "play_pattern": "object",
+          "own_goal_player_appearance_id": "float64",
+          "block_player_appearance_id": "float64",
+          "minute": "int64",
+          "possession": "int64",
+          "stage": "object",
+          "under_pressure": "bool"
+        },
+        "missing_counts": {
+          "own_goal_player_appearance_id": 779,
+          "block_player_appearance_id": 565
+        },
+        "categorical": {
+          "period": {
+            "n_unique": 4,
+            "top_values": {
+              "half_2": 437,
+              "half_1": 330,
+              "extra_time_2": 7,
+              "extra_time_1": 6
+            }
+          },
+          "body_part": {
+            "n_unique": 4,
+            "top_values": {
+              "right_foot": 404,
+              "left_foot": 271,
+              "head": 104,
+              "other": 1
+            }
+          },
+          "technique": {
+            "n_unique": 5,
+            "top_values": {
+              "normal": 691,
+              "volley": 57,
+              "other": 25,
+              "overhead_kick": 4,
+              "lob": 3
+            }
+          },
+          "play_pattern": {
+            "n_unique": 7,
+            "top_values": {
+              "regular_play": 543,
+              "corner_kick": 84,
+              "counter_attack": 60,
+              "indirect_free_kick": 36,
+              "direct_free_kick": 26,
+              "throw_in": 21,
+              "penalty": 10
+            }
+          },
+          "stage": {
+            "n_unique": 3,
+            "top_values": {
+              "top": 748,
+              "middle": 21,
+              "bottom": 11
+            }
+          },
+          "under_pressure": {
+            "n_unique": 2,
+            "top_values": {
+              "True": 607,
+              "False": 173
+            }
+          }
+        }
+      },
+      "pressure": {
+        "n_rows": 12185,
+        "n_cols": 10,
+        "dtypes": {
+          "id": "int64",
+          "period": "object",
+          "player_appearance_id": "int64",
+          "addressee_player_appearance_id": "float64",
+          "accurate": "bool",
+          "pressing_player_appearance_id": "int64",
+          "press_induced_outcome": "object",
+          "pass_angle": "float64",
+          "minute": "int64",
+          "stage": "object"
+        },
+        "missing_counts": {
+          "addressee_player_appearance_id": 649,
+          "pass_angle": 5793,
+          "stage": 14
+        },
+        "categorical": {
+          "period": {
+            "n_unique": 4,
+            "top_values": {
+              "half_1": 7217,
+              "half_2": 4724,
+              "extra_time_1": 138,
+              "extra_time_2": 106
+            }
+          },
+          "accurate": {
+            "n_unique": 2,
+            "top_values": {
+              "True": 6950,
+              "False": 5235
+            }
+          },
+          "press_induced_outcome": {
+            "n_unique": 5,
+            "top_values": {
+              "turnover": 4763,
+              "backward_pass": 3213,
+              "forward_pass": 2274,
+              "ball_carry": 1030,
+              "lateral_pass": 905
+            }
+          },
+          "stage": {
+            "n_unique": 4,
+            "top_values": {
+              "middle": 5492,
+              "top": 4076,
+              "bottom": 2603,
+              "missing": 14
+            }
+          }
+        }
+      }
+    },
+    "first_fold_features": {
+      "n_train_rows": 2940,
+      "n_modeling_cols": 241,
+      "missing_counts": {},
+      "structural_zero_counts": {
+        "cumul_pass_count": 50,
+        "cumul_pass_events_per_minute": 50,
+        "cumul_pass_has_events": 50,
+        "cumul_positive_xt_count": 423,
+        "cumul_press_applied_count": 354,
+        "cumul_press_forced_turnover_count": 575,
+        "cumul_pressure_count": 214,
+        "cumul_pressure_events_per_minute": 214,
+        "cumul_pressure_has_events": 214,
+        "cumul_run_event_count": 109,
+        "cumul_run_events_per_minute": 109,
+        "cumul_run_has_events": 109,
+        "cumul_shot_counter_count": 2865,
+        "cumul_shot_events_per_minute": 2078,
+        "cumul_shot_has_events": 2078,
+        "cumul_shot_set_piece_count": 2723,
+        "last15_pass_count": 99,
+        "last15_pass_events_per_minute": 99,
+        "last15_pass_has_events": 99,
+        "last15_positive_xt_count": 803,
+        "last15_press_applied_count": 631,
+        "last15_press_forced_turnover_count": 1219,
+        "last15_pressure_count": 539,
+        "last15_pressure_events_per_minute": 539,
+        "last15_pressure_has_events": 539,
+        "last15_run_event_count": 205,
+        "last15_run_events_per_minute": 205,
+        "last15_run_has_events": 205,
+        "last15_shot_counter_count": 2903,
+        "last15_shot_events_per_minute": 2497,
+        "last15_shot_has_events": 2497,
+        "last15_shot_set_piece_count": 2850,
+        "last5_hsr_event_count": 553,
+        "last5_pass_count": 644,
+        "last5_pass_events_per_minute": 644,
+        "last5_pass_has_events": 644,
+        "last5_positive_xt_count": 1859,
+        "last5_pressure_count": 1446,
+        "last5_pressure_events_per_minute": 1446,
+        "last5_pressure_has_events": 1446,
+        "last5_run_event_count": 504,
+        "last5_run_events_per_minute": 504,
+        "last5_run_has_events": 504,
+        "last5_shot_counter_count": 2929,
+        "last5_shot_event_count": 2782,
+        "last5_shot_events_per_minute": 2782,
+        "last5_shot_has_events": 2782,
+        "last5_shot_set_piece_count": 2902,
+        "last5_sprint_event_count": 1813
+      }
+    }
+  },
+  "redundant_features_removed": [
+    "cumul_hsr_event_count",
+    "cumul_pressure_expected_turnovers",
+    "cumul_run_distance",
+    "cumul_run_max_speed",
+    "cumul_run_mean_speed",
+    "cumul_shot_event_count",
+    "cumul_shot_top_share",
+    "cumul_shot_under_pressure_rate",
+    "cumul_sprint_event_count",
+    "last15_hsr_event_count",
+    "last15_pressure_expected_turnovers",
+    "last15_run_distance",
+    "last15_run_max_speed",
+    "last15_run_mean_speed",
+    "last15_shot_event_count",
+    "last15_sprint_event_count",
+    "last5_pressure_expected_turnovers",
+    "position"
+  ],
+  "skipped_models": [],
+  "elapsed_seconds": 896.6222655773163
+}

@@ -1,5 +1,3 @@
-"""Data ingestion module with GPU/CPU backend support"""
-
 import logging
 import warnings
 from typing import Union
@@ -10,7 +8,6 @@ from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
-# Try importing cuDF for GPU acceleration
 try:
     import cudf
 
@@ -21,24 +18,17 @@ except ImportError:
 
 
 class DataIngestion:
-    """
-    Data loader with automatic GPU/CPU backend detection
+    """Load WEC2026 CSV files with either pandas or cuDF.
 
-    Handles loading and validation of all WEC2026 dataset files with optimized dtypes
-    and proper handling of temporal boundaries.
+    Args:
+        use_gpu: Force cuDF when True, force pandas when False, or auto-detect
+            when None.
+        config_path: Path to the project YAML config.
     """
 
     def __init__(self, use_gpu: bool | None = None, config_path: str = "config.yaml"):
-        """
-        Initialize data ingestion
-
-        Args:
-            use_gpu: Force GPU (True) or CPU (False). None for auto-detect.
-            config_path: Path to configuration file
-        """
         self.config = get_config(config_path)
 
-        # Determine backend
         if use_gpu is None:
             use_gpu = self.config.use_gpu and CUDF_AVAILABLE
         elif use_gpu and not CUDF_AVAILABLE:
@@ -51,22 +41,15 @@ class DataIngestion:
         logger.info("DataIngestion initialized: backend=%s", self.backend)
 
     def _get_dataframe_backend(self):
-        """Get appropriate DataFrame library (cudf or pandas)"""
         return cudf if self.use_gpu else pd
 
     def load_checkpoint_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
-        """
-        Load main checkpoint dataset (players_quarters_final.csv)
-
-        Returns:
-            DataFrame with player statistics at 15-minute checkpoints
-        """
+        """Load checkpoint-level player observations with narrower dtypes."""
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.checkpoint_file"))
 
         logger.info("Loading checkpoint data from %s", filepath)
 
-        # Optimized dtypes
         dtypes = {
             "player_appearance_id": "int32",
             "player_id": "int32",
@@ -81,7 +64,6 @@ class DataIngestion:
             "scored_after": "int8",
         }
 
-        # Float columns
         float_cols = [
             "last15_sprints",
             "last15_hsr",
@@ -115,14 +97,12 @@ class DataIngestion:
             na_values=["NULL"],
         )
 
-        # Validate data
         self._validate_checkpoint_data(df)
 
         logger.info("Loaded %s checkpoint observations", len(df))
         return df
 
     def load_pass_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
-        """Load pass event data"""
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.pass_file"))
 
@@ -132,7 +112,7 @@ class DataIngestion:
             "id": "int32",
             "period": "category",
             "player_appearance_id": "int32",
-            "addressee_player_appearance_id": "float32",  # Can be NULL
+            "addressee_player_appearance_id": "float32",
             "minute": "int16",
             "stage": "category",
         }
@@ -149,7 +129,6 @@ class DataIngestion:
         return df
 
     def load_run_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
-        """Load high-speed run event data"""
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.run_file"))
 
@@ -180,11 +159,7 @@ class DataIngestion:
         return df
 
     def load_shot_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
-        """
-        Load shot event data
-
-        WARNING: shot outcome columns must be dropped to prevent data leakage
-        """
+        """Load shot event data and drop outcome-like leakage columns."""
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.shot_file"))
 
@@ -210,7 +185,6 @@ class DataIngestion:
             na_values=["NULL"],
         )
 
-        # CRITICAL: Drop outcome columns to prevent leakage
         leakage_cols = ["outcome", "result", "goal", "scored"]
         existing_leakage = [col for col in leakage_cols if col in df.columns]
         if existing_leakage:
@@ -221,7 +195,6 @@ class DataIngestion:
         return df
 
     def load_pressure_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
-        """Load behaviour under pressure data"""
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.pressure_file"))
 
@@ -231,10 +204,10 @@ class DataIngestion:
             "id": "int32",
             "period": "category",
             "player_appearance_id": "int32",
-            "addressee_player_appearance_id": "float32",  # Can be NULL
+            "addressee_player_appearance_id": "float32",
             "pressing_player_appearance_id": "int32",
             "press_induced_outcome": "category",
-            "pass_angle": "float32",  # Can be NULL
+            "pass_angle": "float32",
             "minute": "int16",
             "stage": "category",
         }
@@ -255,12 +228,6 @@ class DataIngestion:
     ) -> tuple[
         Union[pd.DataFrame, "cudf.DataFrame"], dict[str, Union[pd.DataFrame, "cudf.DataFrame"]]
     ]:
-        """
-        Load all datasets
-
-        Returns:
-            Tuple of (checkpoint_df, event_dfs_dict)
-        """
         logger.info("Loading all WEC2026 datasets")
 
         checkpoint_df = self.load_checkpoint_data()
@@ -280,24 +247,15 @@ class DataIngestion:
         return checkpoint_df, event_dfs
 
     def _validate_checkpoint_data(self, df: Union[pd.DataFrame, "cudf.DataFrame"]) -> None:
-        """
-        Validate checkpoint data integrity
-
-        Args:
-            df: Checkpoint DataFrame to validate
-        """
-        # Convert to pandas for validation if using cuDF
         if self.use_gpu:
             df_pd = df.to_pandas()
         else:
             df_pd = df
 
-        # Check for duplicates
         dup_cols = ["player_appearance_id", "checkpoint"]
         if df_pd.duplicated(subset=dup_cols).any():
             warnings.warn("Found duplicate player_appearance_id + checkpoint combinations")
 
-        # Validate substitution boundaries
         invalid_subs = df_pd[
             ~(
                 (df_pd["minute_in"] <= df_pd["checkpoint_min"])
@@ -311,7 +269,6 @@ class DataIngestion:
                 f"player's time on pitch (minute_in to minute_out)"
             )
 
-        # Check target variable distribution
         target_dist = df_pd["scored_after"].value_counts()
         pos_pct = (target_dist.get(1, 0) / len(df_pd)) * 100
 
@@ -330,18 +287,15 @@ class DataIngestion:
 def safe_temporal_filter(
     events_df: Union[pd.DataFrame, "cudf.DataFrame"], checkpoint_min: int, checkpoint_period: str
 ) -> Union[pd.DataFrame, "cudf.DataFrame"]:
-    """
-    Apply strict temporal filtering to prevent data leakage
-
-    Only includes events that occurred at or before the checkpoint minute.
+    """Keep events from the same period at or before a checkpoint.
 
     Args:
-        events_df: Event DataFrame to filter
-        checkpoint_min: Checkpoint minute boundary
-        checkpoint_period: Checkpoint period (half_1 or half_2)
+        events_df: Event frame with `minute` and `period`.
+        checkpoint_min: Period-relative checkpoint minute.
+        checkpoint_period: Period label to match.
 
     Returns:
-        Filtered DataFrame
+        Filtered event frame.
     """
     mask = (events_df["minute"] <= checkpoint_min) & (events_df["period"] == checkpoint_period)
     return events_df[mask]
