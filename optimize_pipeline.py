@@ -1,5 +1,5 @@
 """
-Advanced optimization pipeline with Optuna, TabPFN, and ensemble methods.
+Advanced optimization pipeline with Optuna and ensemble methods.
 Iteratively improves until PR-AUC reaches target (~0.85).
 """
 
@@ -14,7 +14,6 @@ from sklearn.ensemble import StackingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, f1_score, precision_recall_curve
 from sklearn.preprocessing import StandardScaler
-from tabpfn import TabPFNClassifier
 from xgboost import XGBClassifier
 
 from src.config import get_config
@@ -192,34 +191,6 @@ def train_xgboost_with_optuna(X_train, y_train, X_val, y_val, trial):
 
     model = XGBClassifier(**params)
     model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
-
-    return model
-
-
-def train_tabpfn(X_train, y_train):
-    """Train TabPFN (zero-shot Bayesian classifier)."""
-    # TabPFN has limits: max 10k samples, 500 features
-    if len(X_train) > 10000:
-        # Sample stratified
-        from sklearn.model_selection import train_test_split
-
-        X_sampled, _, y_sampled, _ = train_test_split(
-            X_train, y_train, train_size=10000, stratify=y_train, random_state=42
-        )
-    else:
-        X_sampled, y_sampled = X_train, y_train
-
-    if X_sampled.shape[1] > 500:
-        # Use top 500 features by variance
-        from sklearn.feature_selection import VarianceThreshold
-
-        selector = VarianceThreshold()
-        selector.fit(X_sampled)
-        top_indices = np.argsort(selector.variances_)[-500:]
-        X_sampled = X_sampled.iloc[:, top_indices]
-
-    model = TabPFNClassifier(device="cpu", N_ensemble_configurations=8)
-    model.fit(X_sampled.values, y_sampled.values)
 
     return model
 

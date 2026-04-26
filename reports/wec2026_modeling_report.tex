@@ -15,8 +15,8 @@
 \section{Executive Summary}
 The task is a rare-event binary classification problem: predicting whether a player scores after a match checkpoint.
 The modeling table contains 3,486 checkpoint observations, 203 positives (5.82%), 31 fixtures, and 869 player appearances.
-The best grouped cross-validated model in this run was \textbf{xgboost} on \textbf{all\_features} features with ROC-AUC 0.647, PR-AUC 0.124, and balanced accuracy 0.546.
-AutoGluon holdout benchmark reached ROC-AUC 0.694, PR-AUC 0.054, and balanced accuracy 0.499 at threshold 0.5 on its validation fold.
+The best grouped cross-validated model in this run was \textbf{random\_forest} on \textbf{all\_features} features with ROC-AUC 0.679, PR-AUC 0.120, and balanced accuracy 0.500.
+AutoGluon holdout benchmark reached ROC-AUC 0.661, PR-AUC 0.080, and balanced accuracy 0.500 at threshold 0.5 on its validation fold.
 
 \section{Data Audit}
 The checkpoint file provides player state every 15 minutes, including position, home status, formation, substitution times, physical load, shots, and the target \texttt{scored\_after}.
@@ -40,31 +40,29 @@ Before fitting, 18 deterministic or near-deterministic aliases were excluded fro
 
 \section{Model Selection and HPO}
 The benchmark used fixture-grouped stratified cross-validation to prevent match-level leakage.
-Models attempted in this practical run included logistic regression, ExtraTrees, RandomForest, XGBoost, CatBoost, LightGBM, TabPFN, stacking, and optional AutoGluon.
-TabPFN probabilities were included as a base learner in the stacked ensemble whenever the package was available, rather than being evaluated only as a standalone benchmark.
+Models attempted in this run included logistic regression, ExtraTrees, RandomForest, XGBoost, LightGBM, stacking, and a separate AutoGluon holdout benchmark.
+The stacked ensemble combined base learners' out-of-fold probabilities with a lightweight meta-learner trained with the same grouped splits.
 Skipped or unavailable models: None.
-XGBoost used Optuna HPO when the requested trial budget was nonzero; other model parameters were conservative regularized defaults appropriate for the small sample size. Fold-level decision thresholds were selected on each training fold for F1, while ranking metrics such as PR-AUC, precision@10\%, and top-decile lift were computed from out-of-fold probabilities.
+XGBoost used fixed default hyperparameters in this run; Other model parameters were conservative regularized defaults appropriate for the small sample size. Fold-level decision thresholds were selected on each training fold for F1, while ranking metrics such as PR-AUC, precision@10\%, and top-decile lift were computed from out-of-fold probabilities.
 
 \section{Grouped Cross-Validated Results}
 \begin{longtable}{llrrrrrrr}
 \toprule
 Model & Feature set & ROC-AUC & PR-AUC & P@10\% & Lift@10\% & Bal. Acc. & F1 & Brier \\
 \midrule
-xgboost & all\_features & 0.647 & 0.124 & 0.135 & 2.313 & 0.546 & 0.147 & 0.098 \\
-tabpfn & all\_features & 0.637 & 0.117 & 0.115 & 1.968 & 0.500 & 0.000 & 0.055 \\
-random\_forest & all\_features & 0.679 & 0.111 & 0.132 & 2.263 & 0.500 & 0.000 & 0.058 \\
-xgboost & recent\_only & 0.649 & 0.106 & 0.126 & 2.165 & 0.501 & 0.009 & 0.062 \\
-extra\_trees & all\_features & 0.659 & 0.103 & 0.126 & 2.165 & 0.500 & 0.000 & 0.061 \\
-lightgbm & all\_features & 0.627 & 0.100 & 0.123 & 2.116 & 0.500 & 0.000 & 0.060 \\
-xgboost & base\_plus\_passing & 0.624 & 0.098 & 0.126 & 2.165 & 0.502 & 0.010 & 0.062 \\
-xgboost & base\_plus\_pressure & 0.623 & 0.098 & 0.123 & 2.116 & 0.499 & 0.000 & 0.062 \\
-xgboost & base\_checkpoint & 0.626 & 0.096 & 0.123 & 2.116 & 0.499 & 0.000 & 0.063 \\
-xgboost & cumulative\_only & 0.620 & 0.095 & 0.115 & 1.968 & 0.500 & 0.009 & 0.064 \\
-catboost & all\_features & 0.540 & 0.093 & 0.077 & 1.329 & 0.563 & 0.174 & 0.146 \\
-logistic & all\_features & 0.590 & 0.082 & 0.106 & 1.821 & 0.539 & 0.124 & 0.200 \\
-stacked & all\_features & 0.559 & 0.081 & 0.103 & 1.771 & 0.556 & 0.135 & 0.055 \\
-xgboost & sprints\_shots & 0.586 & 0.072 & 0.074 & 1.279 & 0.502 & 0.031 & 0.077 \\
-xgboost & external\_context & 0.549 & 0.065 & 0.052 & 0.886 & 0.494 & 0.051 & 0.128 \\
+random\_forest & all\_features & 0.679 & 0.120 & 0.149 & 2.559 & 0.500 & 0.000 & 0.058 \\
+stacked & all\_features & 0.682 & 0.114 & 0.140 & 2.411 & 0.613 & 0.186 & 0.054 \\
+lightgbm & all\_features & 0.656 & 0.114 & 0.129 & 2.214 & 0.500 & 0.000 & 0.059 \\
+xgboost & base\_checkpoint & 0.647 & 0.114 & 0.149 & 2.559 & 0.499 & 0.000 & 0.060 \\
+extra\_trees & all\_features & 0.674 & 0.114 & 0.140 & 2.411 & 0.500 & 0.000 & 0.061 \\
+xgboost & base\_plus\_passing & 0.648 & 0.111 & 0.146 & 2.509 & 0.499 & 0.000 & 0.060 \\
+xgboost & base\_plus\_pressure & 0.642 & 0.108 & 0.135 & 2.313 & 0.502 & 0.010 & 0.060 \\
+xgboost & cumulative\_only & 0.631 & 0.108 & 0.123 & 2.116 & 0.506 & 0.028 & 0.063 \\
+xgboost & all\_features & 0.650 & 0.107 & 0.126 & 2.165 & 0.499 & 0.000 & 0.060 \\
+xgboost & recent\_only & 0.630 & 0.094 & 0.123 & 2.116 & 0.499 & 0.000 & 0.062 \\
+xgboost & sprints\_shots & 0.615 & 0.090 & 0.089 & 1.525 & 0.501 & 0.024 & 0.072 \\
+logistic & all\_features & 0.580 & 0.078 & 0.103 & 1.771 & 0.558 & 0.143 & 0.186 \\
+xgboost & external\_context & 0.556 & 0.071 & 0.083 & 1.427 & 0.518 & 0.096 & 0.134 \\
 \bottomrule
 \end{longtable}
 
@@ -73,7 +71,7 @@ xgboost & external\_context & 0.549 & 0.065 & 0.052 & 0.886 & 0.494 & 0.051 & 0.
 \toprule
 Model & Feature set & ROC-AUC & PR-AUC & Bal. Acc. & F1 & Brier \\
 \midrule
-autogluon\_holdout & all\_features & 0.694 & 0.054 & 0.499 & 0.000 & 0.021 \\
+autogluon\_holdout & all\_features & 0.661 & 0.080 & 0.500 & 0.000 & 0.047 \\
 \bottomrule
 \end{longtable}
 
@@ -82,14 +80,14 @@ autogluon\_holdout & all\_features & 0.694 & 0.054 & 0.499 & 0.000 & 0.021 \\
 \toprule
 Feature set & ROC-AUC & PR-AUC & Bal. Acc. & F1 \\
 \midrule
-all\_features & 0.647 & 0.124 & 0.546 & 0.147 \\
-recent\_only & 0.649 & 0.106 & 0.501 & 0.009 \\
-base\_plus\_passing & 0.624 & 0.098 & 0.502 & 0.010 \\
-base\_plus\_pressure & 0.623 & 0.098 & 0.499 & 0.000 \\
-base\_checkpoint & 0.626 & 0.096 & 0.499 & 0.000 \\
-cumulative\_only & 0.620 & 0.095 & 0.500 & 0.009 \\
-sprints\_shots & 0.586 & 0.072 & 0.502 & 0.031 \\
-external\_context & 0.549 & 0.065 & 0.494 & 0.051 \\
+base\_checkpoint & 0.647 & 0.114 & 0.499 & 0.000 \\
+base\_plus\_passing & 0.648 & 0.111 & 0.499 & 0.000 \\
+base\_plus\_pressure & 0.642 & 0.108 & 0.502 & 0.010 \\
+cumulative\_only & 0.631 & 0.108 & 0.506 & 0.028 \\
+all\_features & 0.650 & 0.107 & 0.499 & 0.000 \\
+recent\_only & 0.630 & 0.094 & 0.499 & 0.000 \\
+sprints\_shots & 0.615 & 0.090 & 0.501 & 0.024 \\
+external\_context & 0.556 & 0.071 & 0.518 & 0.096 \\
 \bottomrule
 \end{longtable}
 
@@ -98,28 +96,17 @@ external\_context & 0.549 & 0.065 & 0.494 & 0.051 \\
 \toprule
 Feature & PR-AUC drop after permutation \\
 \midrule
-recent\_distance\_ratio & 0.031 \\
-cumul\_pass\_bottom\_share & 0.030 \\
-cumul\_pressure\_quality & 0.030 \\
-last15\_pass\_bottom\_share\_smoothed & 0.029 \\
-attacker\_x\_last15\_pass\_top\_share & 0.028 \\
-cumul\_pressure\_top\_share\_smoothed & 0.027 \\
-last15\_pass\_bottom\_share & 0.027 \\
-is\_defender & 0.027 \\
-cumul\_pass\_events\_per\_minute & 0.027 \\
-recent\_hsr\_ratio & 0.026 \\
-cumul\_pressure\_retention\_smoothed & 0.026 \\
-cumul\_pass\_top\_share & 0.026 \\
+Permutation importance did not show stable positive PR-AUC drops in this run. \\
 \bottomrule
 \end{longtable}
 
 \section{Research Questions}
 \paragraph{RQ1.}
-Player behaviour during a match is predictive but noisy because goals are rare. In this run the best grouped-CV model reached ROC-AUC 0.647, PR-AUC 0.124, and balanced accuracy 0.546.
+Player behaviour during a match is predictive but noisy because goals are rare. In this run the best grouped-CV model reached ROC-AUC 0.679, PR-AUC 0.120, and balanced accuracy 0.500.
 \paragraph{RQ2.}
 The strongest determinants are identified by a combination of ablation deltas and permutation importance. In this run they were dominated by pass-zone shares, recent distance intensity, role indicators, pressure-location metrics, and pressure quality; the exact ranked variables are reported in the feature-importance table.
 \paragraph{RQ3.}
-The sprint-and-shot-only ablation should be compared against the all-feature model. Its result in this run was 0.072 PR-AUC, so it is not assumed sufficient unless it matches the all-feature score.
+The sprint-and-shot-only ablation should be compared against the all-feature model. Its result in this run was 0.090 PR-AUC, so it is not assumed sufficient unless it matches the all-feature score.
 \paragraph{RQ4.}
 Passing and pressure data are useful when their ablation improves over the base checkpoint model. The report tables show whether \texttt{base\_plus\_passing} and \texttt{base\_plus\_pressure} improve ROC-AUC/PR-AUC/balanced accuracy.
 \paragraph{RQ5.}

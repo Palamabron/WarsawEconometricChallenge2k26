@@ -7,6 +7,7 @@ importance plots on top of the same fold-safe feature build.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -34,6 +35,8 @@ from src.temporal_features import TARGET_COL  # noqa: E402
 
 FIGURE_DIR = wec_eda.FIGURE_DIR
 SUMMARY_PATH = FIGURE_DIR / "eda_plot_summary.json"
+
+DEFAULT_EXPERIMENT_DIR = PROJECT_ROOT / "outputs" / "experiments" / "wec_modeling_upgrade"
 
 
 def savefig(path: Path) -> None:
@@ -211,12 +214,88 @@ def make_model_plots(metrics: pd.DataFrame, importances: pd.DataFrame) -> dict[s
     }
 
 
+def make_experiment_artifact_plots(
+    experiment_dir: Path, top_importance: int
+) -> dict[str, Any]:
+    """Use metrics/feature importance produced by run_experiment.py (no extra CV training)."""
+    metrics_path = experiment_dir / "metrics.csv"
+    importance_path = experiment_dir / "feature_importance.csv"
+    if not metrics_path.exists():
+        raise FileNotFoundError(f"Missing metrics export: {metrics_path}")
+    if not importance_path.exists():
+        raise FileNotFoundError(f"Missing feature importance export: {importance_path}")
+
+    metrics = pd.read_csv(metrics_path)
+    ranked = metrics.sort_values(["pr_auc", "roc_auc"], ascending=False)
+    oof_only = ranked[ranked["feature_set"].eq("all_features")].copy()
+    if oof_only.empty:
+        oof_only = ranked.copy()
+
+    _fig, ax = plt.subplots(figsize=(8, 4.5))
+    x = np.arange(len(oof_only))
+    width = 0.35
+    ax.bar(x - width / 2, oof_only["pr_auc"], width, label="PR-AUC")
+    ax.bar(x + width / 2, oof_only["roc_auc"], width, label="ROC-AUC")
+    ax.set_xticks(x)
+    ax.set_xticklabels(oof_only["model"], rotation=25, ha="right")
+    ax.set_ylim(0, max(0.25, float(oof_only["roc_auc"].max()) + 0.05))
+    ax.set_title("Experiment models (OOF, all_features)")
+    ax.legend(frameon=False)
+    ax.grid(axis="y", alpha=0.25)
+    savefig(FIGURE_DIR / "model_comparison.pdf")
+    oof_only.to_csv(FIGURE_DIR / "model_metrics.csv", index=False)
+
+    importance = pd.read_csv(importance_path)
+    if not importance.empty and importance["importance_pr_auc_drop"].abs().sum() > 0:
+        top = importance.sort_values("importance_pr_auc_drop", ascending=False).head(top_importance)
+        plt.figure(figsize=(8, max(3.2, 0.28 * len(top))))
+        plt.barh(top["feature"][::-1], top["importance_pr_auc_drop"][::-1], color="#4C78A8")
+        plt.title("Top OOF permutation importance (from run_experiment.py)")
+        plt.xlabel("PR-AUC drop after permutation")
+        plt.grid(axis="x", alpha=0.25)
+        savefig(FIGURE_DIR / "model_feature_importance.pdf")
+        top.to_csv(FIGURE_DIR / "model_feature_importance.csv", index=False)
+        importance_payload = top.to_dict(orient="records")
+    else:
+        importance_payload = []
+
+    return {
+        "source": "run_experiment_exports",
+        "experiment_dir": str(experiment_dir),
+        "metrics": oof_only.to_dict(orient="records"),
+        "importance": importance_payload,
+    }
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Regenerate EDA and modeling report figures")
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Skip the internal grouped-CV retraining benchmark; plot from run_experiment outputs",
+    )
+    parser.add_argument(
+        "--experiment-dir",
+        type=Path,
+        default=DEFAULT_EXPERIMENT_DIR,
+        help="Directory containing metrics.csv and feature_importance.csv from run_experiment.py",
+    )
+    parser.add_argument(
+        "--top-importance",
+        type=int,
+        default=15,
+        help="Number of top features to plot in fast mode",
+    )
+    args = parser.parse_args()
+
     FIGURE_DIR.mkdir(parents=True, exist_ok=True)
     checkpoint, event_dfs = wec_eda.load_data()
     summary, features, feature_cols, splits = wec_eda.run_eda(checkpoint, event_dfs)
-    metrics, importances = evaluate_models(features, feature_cols, splits)
-    summary.update(make_model_plots(metrics, importances))
+    if args.fast:
+        summary.update(make_experiment_artifact_plots(args.experiment_dir, args.top_importance))
+    else:
+        metrics, importances = evaluate_models(features, feature_cols, splits)
+        summary.update(make_model_plots(metrics, importances))
     SUMMARY_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"Wrote figures and summaries to {FIGURE_DIR}")
 

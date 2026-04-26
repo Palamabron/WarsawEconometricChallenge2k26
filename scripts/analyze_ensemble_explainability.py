@@ -12,7 +12,7 @@ import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import joblib
 import matplotlib.pyplot as plt
@@ -48,14 +48,15 @@ logger = logging.getLogger(__name__)
 class ExplainabilityArgs:
     """Command-line options for post-run explainability analysis."""
 
+    mode: Literal["full", "scan"] = "full"
     output_dir: Path = DEFAULT_OUTPUT_DIR
     model_dir: Path = DEFAULT_MODEL_DIR
     analysis_dir: Path = DEFAULT_ANALYSIS_DIR
     folds: int | None = None
-    top_n: int = 30
-    permutation_repeats: int = 5
-    shap_sample: int = 400
-    max_diagnostic_cols: int = 6
+    top_n: int = 12
+    permutation_repeats: int = 2
+    shap_sample: int = 200
+    max_diagnostic_cols: int = 4
     max_shap_summary_plots: int = 4
     log_level: str = "INFO"
 
@@ -107,14 +108,6 @@ def native_importance_for_model(model_name: str, model: Any, columns: list[str])
         if hasattr(estimator, "coef_"):
             values = np.abs(estimator.coef_).ravel()
             return pd.DataFrame({"feature": columns, "importance": values})
-        return pd.DataFrame(columns=["feature", "importance"])
-
-    if isinstance(model, tuple) and isinstance(model[0], list):
-        selected, estimator = model
-        if hasattr(estimator, "feature_importances_"):
-            return pd.DataFrame(
-                {"feature": selected, "importance": np.asarray(estimator.feature_importances_)}
-            )
         return pd.DataFrame(columns=["feature", "importance"])
 
     if hasattr(model, "feature_importances_"):
@@ -506,6 +499,45 @@ def main() -> None:
     args.analysis_dir.mkdir(parents=True, exist_ok=True)
 
     oof_df, n_splits = load_run_metadata(args.output_dir, args.folds)
+    if args.mode == "scan":
+        logger.info(
+            "Explainability scan mode: skipping fold rebuild, permutation, SHAP, and native importances"
+        )
+        weights, ensemble_perf = analyze_ensemble(args.output_dir / "oof_predictions.csv")
+
+        y_true = oof_df["true_label"].astype(int).to_numpy()
+        diag_cols = select_oof_diagnostic_columns(oof_df, ensemble_perf, args.max_diagnostic_cols)
+        oof_preds = {c: oof_df[c].astype(float).to_numpy() for c in diag_cols if c in oof_df.columns}
+        plot_oof_precision_recall(y_true, oof_preds, args.analysis_dir / "oof_precision_recall.pdf")
+
+        weights.to_csv(args.analysis_dir / "stacked_meta_weights.csv", index=False)
+        ensemble_perf.to_csv(args.analysis_dir / "ensemble_oof_performance.csv", index=False)
+
+        if not weights.empty:
+            plot_weights = weights.sort_values("standardized_meta_weight").copy()
+            plt.figure(figsize=(8, max(3, 0.35 * len(plot_weights))))
+            plt.barh(plot_weights["base_model"], plot_weights["standardized_meta_weight"])
+            plt.axvline(0, color="black", linewidth=0.8)
+            plt.title("Stacked Ensemble Meta-Model Weights")
+            plt.xlabel("standardized logistic coefficient")
+            plt.tight_layout()
+            plt.savefig(args.analysis_dir / "stacked_meta_weights.pdf", bbox_inches="tight")
+            plt.close()
+
+        # Write tiny placeholder artifacts so downstream tooling can rely on the filenames.
+        pd.DataFrame(
+            columns=["model", "feature", "importance_mean", "importance_std"]
+        ).to_csv(args.analysis_dir / "native_feature_importance_by_model.csv", index=False)
+        pd.DataFrame(
+            columns=["model", "feature", "pr_auc_drop_mean", "pr_auc_drop_std"]
+        ).to_csv(args.analysis_dir / "permutation_importance_by_model.csv", index=False)
+        pd.DataFrame(columns=["model", "feature", "mean_abs_shap"]).to_csv(
+            args.analysis_dir / "shap_importance_by_model.csv", index=False
+        )
+
+        logger.info("Explainability scan artifacts written to %s", args.analysis_dir)
+        return
+
     checkpoint_df, event_dfs = exp.load_data()
     folds = exp.build_fold_artifacts(
         checkpoint_df.reset_index(drop=True), event_dfs, n_splits=n_splits

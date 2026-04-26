@@ -109,7 +109,7 @@ Current fold-safe flow:
 - `external_context`
 - `all_features`
 
-It then benchmarks logistic regression, ExtraTrees, RandomForest, XGBoost, CatBoost, LightGBM, TabPFN, stacking, and optional AutoGluon when installed.
+It then benchmarks logistic regression, ExtraTrees, RandomForest, XGBoost, CatBoost, LightGBM, stacking, and optional AutoGluon when installed.
 
 ## Leakage And Temporal Integrity Rules
 

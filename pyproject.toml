@@ -10,7 +10,6 @@ dependencies = [
     "xgboost>=2.0.0",
     "catboost>=1.2.0",
     "lightgbm>=4.0.0",
-    "tabpfn>=0.2.0",
     "autogluon.tabular>=1.2.0",
     "optuna>=3.5.0",
     "pydantic>=2.0.0",
@@ -107,7 +106,6 @@ module = [
     "joblib.*",
     "sklearn.*",
     "shap.*",
-    "tabpfn.*",
     "optuna.*",
 ]
 ignore_missing_imports = true

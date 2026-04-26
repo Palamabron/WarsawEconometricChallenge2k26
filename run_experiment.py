@@ -3,6 +3,7 @@
 Examples:
     python run_experiment.py --preset smoke
     python run_experiment.py --preset practical --hpo-trials 20 --include-autogluon
+    python run_experiment.py --preset fast
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ import tyro
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
 from sklearn.exceptions import NotFittedError
-from sklearn.feature_selection import mutual_info_classif
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -77,7 +77,6 @@ TARGET_ENCODE_COLS = {"position", "formation"}
 os.environ.setdefault("XDG_CACHE_HOME", str(CACHE_DIR))
 os.environ.setdefault("HF_HOME", str(CACHE_DIR / "huggingface"))
 os.environ.setdefault("TORCH_HOME", str(CACHE_DIR / "torch"))
-os.environ.setdefault("TABPFN_CACHE_DIR", str(CACHE_DIR / "tabpfn"))
 
 
 @dataclass
@@ -93,9 +92,12 @@ class FoldArtifacts:
 class ExperimentArgs:
     """Command-line options for the report-grade WEC2026 experiment."""
 
-    preset: Literal["smoke", "practical"] = "practical"
+    preset: Literal["smoke", "practical", "fast"] = "practical"
     hpo_trials: int | None = None
     folds: int | None = None
+    importance_model: Literal["auto", "xgboost", "extra_trees", "random_forest", "lightgbm"] = (
+        "xgboost"
+    )
     include_autogluon: bool = False
     autogluon_time_limit: int = 900
     config_path: str = "config.yaml"
@@ -515,30 +517,6 @@ def soft_positive_weight(y: pd.Series | np.ndarray, power: float = 0.75) -> floa
     return float((negatives / positives) ** power)
 
 
-def select_tabpfn_features(
-    x_train: pd.DataFrame,
-    y_train: pd.Series,
-    max_features: int,
-) -> list[str]:
-    """Select TabPFN inputs with a train-only target-aware score."""
-    if x_train.shape[1] <= max_features:
-        return x_train.columns.tolist()
-    try:
-        scores = mutual_info_classif(
-            x_train.replace([np.inf, -np.inf], np.nan).fillna(0),
-            y_train.astype(int),
-            discrete_features=False,
-            random_state=42,
-        )
-        ranked = pd.Series(scores, index=x_train.columns).sort_values(ascending=False)
-    except Exception:
-        corrs = x_train.corrwith(y_train.astype(float)).abs().fillna(0)
-        ranked = corrs.sort_values(ascending=False)
-    if float(ranked.sum()) <= 0:
-        ranked = x_train.var().sort_values(ascending=False)
-    return ranked.head(max_features).index.tolist()
-
-
 def fit_predict_model(
     model_name: str,
     x_train: pd.DataFrame,
@@ -694,17 +672,6 @@ def fit_predict_model(
                 raise
         return model.predict_proba(x_val)[:, 1], model
 
-    if model_name == "tabpfn":
-        try:
-            from tabpfn import TabPFNClassifier
-        except Exception as exc:
-            raise ImportError("tabpfn is not installed") from exc
-        max_features = min(500, x_train.shape[1])
-        selected = select_tabpfn_features(x_train, y_train, max_features)
-        model = TabPFNClassifier(device="cuda" if use_gpu else "cpu")
-        model.fit(x_train[selected], y_train)
-        return model.predict_proba(x_val[selected])[:, 1], (selected, model)
-
     raise ValueError(f"Unknown model: {model_name}")
 
 
@@ -713,9 +680,6 @@ def predict_model_proba(model: Any, x: pd.DataFrame) -> np.ndarray:
     if isinstance(model, tuple) and hasattr(model[0], "transform"):
         scaler, estimator = model
         return estimator.predict_proba(scaler.transform(x))[:, 1]
-    if isinstance(model, tuple) and isinstance(model[0], list):
-        selected, estimator = model
-        return estimator.predict_proba(x[selected])[:, 1]
     return model.predict_proba(x)[:, 1]
 
 
@@ -823,6 +787,10 @@ def permutation_importance_oof(
     max_features: int = 40,
 ) -> pd.DataFrame:
     """Compute validation-fold permutation importance for a manageable feature subset."""
+    if max_features < 1:
+        return pd.DataFrame(
+            columns=["feature", "baseline_pr_auc", "permuted_pr_auc", "importance_pr_auc_drop"]
+        )
     base_pr = average_precision_score(y_all, baseline_pred)
     candidates = []
     all_features = pd.concat([fold.train_features[feature_cols] for fold in folds], axis=0)
@@ -858,9 +826,6 @@ def permutation_importance_oof(
             if isinstance(model, tuple) and hasattr(model[0], "transform"):
                 scaler, estimator = model
                 pred = estimator.predict_proba(scaler.transform(shuffled))[:, 1]
-            elif isinstance(model, tuple) and isinstance(model[0], list):
-                selected, estimator = model
-                pred = estimator.predict_proba(shuffled[selected])[:, 1]
             else:
                 pred = model.predict_proba(shuffled)[:, 1]
             perm_pred[fold.val_idx] = pred
@@ -926,6 +891,10 @@ def write_report(
     skipped_models: list[str],
     feature_sets: dict[str, list[str]] | None = None,
     redundant_removed: list[str] | None = None,
+    *,
+    base_models: list[str] | None = None,
+    include_autogluon: bool = True,
+    xgboost_hpo_trials: int = 0,
 ) -> None:
     """Write the final LaTeX report."""
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -1017,6 +986,39 @@ def write_report(
         else r"None recorded. \\"
     )
 
+    def humanize_model_name(name: str) -> str:
+        mapping: dict[str, str] = {
+            "logistic": "logistic regression",
+            "extra_trees": "ExtraTrees",
+            "random_forest": "RandomForest",
+            "xgboost": "XGBoost",
+            "catboost": "CatBoost",
+            "lightgbm": "LightGBM",
+        }
+        return mapping.get(name, name.replace("_", r"\_"))
+
+    base_models = base_models or [
+        "logistic",
+        "extra_trees",
+        "random_forest",
+        "xgboost",
+        "catboost",
+        "lightgbm",
+    ]
+    model_attempt_list = [humanize_model_name(m) for m in base_models]
+    if include_autogluon:
+        model_attempt_list.append("a separate AutoGluon holdout benchmark")
+    models_attempted_text = (
+        ", ".join(model_attempt_list[:-1]) + ", stacking, and " + model_attempt_list[-1]
+        if len(model_attempt_list) > 1
+        else f"{model_attempt_list[0]}, stacking"
+    )
+    hpo_xgb_text = (
+        "XGBoost used Optuna HPO in this run when the XGBoost trial budget was nonzero; "
+        if int(xgboost_hpo_trials) > 0
+        else "XGBoost used fixed default hyperparameters in this run; "
+    )
+
     report = rf"""\documentclass[11pt]{{article}}
 \usepackage[margin=1in]{{geometry}}
 \usepackage{{booktabs}}
@@ -1059,10 +1061,10 @@ Recent-vs-cumulative ratios were included to test short-term intensity surges.
 
 \section{{Model Selection and HPO}}
 The benchmark used fixture-grouped stratified cross-validation to prevent match-level leakage.
-Models attempted in this practical run included logistic regression, ExtraTrees, RandomForest, XGBoost, CatBoost, LightGBM, TabPFN, stacking, and optional AutoGluon.
-TabPFN probabilities were included as a base learner in the stacked ensemble whenever the package was available, rather than being evaluated only as a standalone benchmark.
+Models attempted in this run included {latex_escape(models_attempted_text)}.
+The stacked ensemble combined base learners' out-of-fold probabilities with a lightweight meta-learner trained with the same grouped splits.
 Skipped or unavailable models: {latex_escape(skipped_text)}.
-XGBoost used Optuna HPO when the requested trial budget was nonzero; other model parameters were conservative regularized defaults appropriate for the small sample size. {latex_escape(threshold_text)}
+{latex_escape(hpo_xgb_text)}Other model parameters were conservative regularized defaults appropriate for the small sample size. {latex_escape(threshold_text)}
 
 \section{{Grouped Cross-Validated Results}}
 \begin{{longtable}}{{llrrrrrrr}}
@@ -1136,10 +1138,20 @@ def run_experiment(args: ExperimentArgs) -> None:
     use_gpu = detect_cuda()
     hpo_trials = args.hpo_trials
     if hpo_trials is None:
-        hpo_trials = 1 if args.preset == "smoke" else 12
+        if args.preset == "smoke":
+            hpo_trials = 1
+        elif args.preset == "fast":
+            hpo_trials = 0
+        else:
+            hpo_trials = 12
     n_splits = int(args.folds or config.n_folds)
-    if args.preset == "smoke":
+    if args.preset in {"smoke", "fast"}:
         n_splits = min(n_splits, 3)
+    include_autogluon = bool(args.include_autogluon or args.preset == "fast")
+    autogluon_time_limit = int(args.autogluon_time_limit)
+    if args.preset == "fast" and args.autogluon_time_limit == 900:
+        autogluon_time_limit = 420
+    xgboost_hpo_trials = 0 if args.preset == "fast" else hpo_trials
 
     checkpoint_df, event_dfs = load_data(data_dir)
     checkpoint_df = validate_training_checkpoints(checkpoint_df, event_dfs)
@@ -1185,7 +1197,9 @@ def run_experiment(args: ExperimentArgs) -> None:
                 ablation_model,
                 y,
                 use_gpu=use_gpu,
-                hpo_trials=hpo_trials if feature_set_name == "all_features" else 0,
+                hpo_trials=hpo_trials
+                if feature_set_name == "all_features" and args.preset != "fast"
+                else 0,
             )
         except Exception as exc:
             skipped_models.append(f"{ablation_model}/{feature_set_name}: {exc}")
@@ -1197,17 +1211,19 @@ def run_experiment(args: ExperimentArgs) -> None:
         fold_rows.extend(fold_metrics)
 
     # Main all-feature benchmark.
-    base_models = [
-        "logistic",
-        "extra_trees",
-        "random_forest",
-        "xgboost",
-        "catboost",
-        "lightgbm",
-        "tabpfn",
-    ]
-    if args.preset == "smoke":
-        base_models = ["logistic", "extra_trees", "xgboost", "catboost", "tabpfn"]
+    if args.preset == "practical":
+        base_models = [
+            "logistic",
+            "extra_trees",
+            "random_forest",
+            "xgboost",
+            "catboost",
+            "lightgbm",
+        ]
+    elif args.preset == "fast":
+        base_models = ["logistic", "extra_trees", "random_forest", "xgboost", "lightgbm"]
+    else:
+        base_models = ["logistic", "extra_trees", "xgboost", "catboost"]
     all_cols = feature_sets["all_features"]
     data_audit = build_data_audit(checkpoint_df, event_dfs, folds, all_cols)
     all_oof_for_stack: dict[str, np.ndarray] = {}
@@ -1222,7 +1238,7 @@ def run_experiment(args: ExperimentArgs) -> None:
                 model_name,
                 y,
                 use_gpu=use_gpu,
-                hpo_trials=hpo_trials if model_name == "xgboost" else 0,
+                hpo_trials=xgboost_hpo_trials if model_name == "xgboost" else 0,
             )
         except Exception as exc:
             logger.warning("Skipping %s: %s", model_name, exc)
@@ -1248,13 +1264,19 @@ def run_experiment(args: ExperimentArgs) -> None:
             evaluate_predictions(y, stacked, "stacked", "all_features", y_pred=stacked_labels)
         )
 
-    if args.include_autogluon:
+    if include_autogluon:
         logger.info("Running optional AutoGluon holdout benchmark")
+        if args.preset == "smoke":
+            ag_time_limit = 120
+        elif args.preset == "fast":
+            ag_time_limit = autogluon_time_limit
+        else:
+            ag_time_limit = int(args.autogluon_time_limit)
         ag_result = run_autogluon_smoke(
             folds[0].train_features,
             folds[0].val_features,
             all_cols,
-            time_limit=args.autogluon_time_limit if args.preset != "smoke" else 120,
+            time_limit=ag_time_limit,
             use_gpu=use_gpu,
         )
         if ag_result is None:
@@ -1275,7 +1297,9 @@ def run_experiment(args: ExperimentArgs) -> None:
         0, "player_appearance_id", checkpoint_df["player_appearance_id"].to_numpy()
     )
 
-    if all_oof_for_stack:
+    if args.importance_model != "auto" and args.importance_model in all_oof_for_stack:
+        importance_model = args.importance_model
+    elif all_oof_for_stack:
         importance_model = max(
             all_oof_for_stack,
             key=lambda name: average_precision_score(y, all_oof_for_stack[name]),
@@ -1290,6 +1314,12 @@ def run_experiment(args: ExperimentArgs) -> None:
         ),
     )
     try:
+        if args.preset == "practical":
+            perm_max_features = 40
+        elif args.preset == "fast":
+            perm_max_features = 0
+        else:
+            perm_max_features = 8
         importances = permutation_importance_oof(
             folds,
             all_cols,
@@ -1297,7 +1327,7 @@ def run_experiment(args: ExperimentArgs) -> None:
             baseline_pred,
             model_name=importance_model,
             use_gpu=use_gpu,
-            max_features=20 if args.preset == "smoke" else 40,
+            max_features=perm_max_features,
         )
     except Exception as exc:
         skipped_models.append(f"permutation_importance: {exc}")
@@ -1317,6 +1347,9 @@ def run_experiment(args: ExperimentArgs) -> None:
                 "preset": args.preset,
                 "hpo_trials": hpo_trials,
                 "folds": n_splits,
+                "importance_model": importance_model,
+                "include_autogluon": include_autogluon,
+                "autogluon_time_limit": autogluon_time_limit,
                 "feature_counts": {name: len(cols) for name, cols in feature_sets.items()},
                 "data_audit": data_audit,
                 "redundant_features_removed": redundant_removed,
@@ -1335,6 +1368,9 @@ def run_experiment(args: ExperimentArgs) -> None:
         skipped_models,
         feature_sets=feature_sets,
         redundant_removed=redundant_removed,
+        base_models=base_models,
+        include_autogluon=include_autogluon,
+        xgboost_hpo_trials=xgboost_hpo_trials,
     )
 
     logger.info("Experiment complete")
