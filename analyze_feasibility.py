@@ -174,4 +174,4 @@ else:
     print("\nContinue with:")
     print("  1. Ensemble methods")
     print("  2. Careful feature selection")
-    print("  3. Advanced models (TabPFN, Neural Networks)")
+    print("  3. Advanced models (AutoGluon / deep stacks, when available)")

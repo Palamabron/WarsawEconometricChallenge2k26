@@ -5,10 +5,13 @@ Calculates the value of possession in different pitch zones and aggregates
 threat-adding actions per player per checkpoint.
 """
 
+import logging
 from typing import Union
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 try:
     import cudf
@@ -47,8 +50,8 @@ class ExpectedThreatCalculator:
         self.max_iterations = max_iterations
         self.use_gpu = use_gpu and CUDF_AVAILABLE
 
-        self.zone_threat_values = None
-        self.transition_matrix = None
+        self.zone_threat_values: np.ndarray | None = None
+        self.transition_matrix: np.ndarray | None = None
 
     def compute_transition_matrix(
         self, pass_df: Union[pd.DataFrame, "cudf.DataFrame"]
@@ -66,9 +69,9 @@ class ExpectedThreatCalculator:
         """
         # Filter for accurate passes only
         if self.use_gpu:
-            accurate_passes = pass_df[pass_df["accurate"] == True].to_pandas()
+            accurate_passes = pass_df[pass_df["accurate"].eq(True)].to_pandas()
         else:
-            accurate_passes = pass_df[pass_df["accurate"] == True].copy()
+            accurate_passes = pass_df[pass_df["accurate"].eq(True)].copy()
 
         # Count transitions
         # Note: We don't have explicit destination zones, so we'll use sequential analysis
@@ -143,7 +146,7 @@ class ExpectedThreatCalculator:
         shot_counts = shot_df["stage"].value_counts()
 
         if pass_df is not None:
-            accurate_passes = pass_df[pass_df["accurate"] == True]
+            accurate_passes = pass_df[pass_df["accurate"].eq(True)]
             pass_counts = accurate_passes["stage"].value_counts()
         else:
             pass_counts = pd.Series(dtype=int)
@@ -202,10 +205,14 @@ class ExpectedThreatCalculator:
             # Check convergence
             delta = np.abs(threat_values - old_values).max()
             if delta < self.convergence_threshold:
-                print(f"xT converged after {iteration + 1} iterations (delta={delta:.6f})")
+                logger.info(
+                    "xT converged after %s iterations: delta=%.6f",
+                    iteration + 1,
+                    delta,
+                )
                 break
         else:
-            print(f"xT did not converge after {self.max_iterations} iterations")
+            logger.info("xT did not converge after %s iterations", self.max_iterations)
 
         self.zone_threat_values = threat_values
         return threat_values
@@ -225,11 +232,11 @@ class ExpectedThreatCalculator:
         Returns:
             Self
         """
-        print("Computing Expected Threat model...")
+        logger.info("Computing Expected Threat model")
 
         # Compute transition matrix
         transition_matrix = self.compute_transition_matrix(pass_df)
-        print(f"Transition matrix:\n{transition_matrix}")
+        logger.debug("Transition matrix:\n%s", transition_matrix)
 
         # Compute shot probabilities (pass_df used to estimate total possessions per zone)
         shot_probs, goal_probs = self.compute_shot_probabilities(shot_df, pass_df)
@@ -237,9 +244,10 @@ class ExpectedThreatCalculator:
         # Iterate to convergence
         threat_values = self.iterate_threat_values(transition_matrix, shot_probs, goal_probs)
 
-        print("\nExpected Threat values by zone:")
-        for zone, value in zip(self.zones, threat_values):
-            print(f"  {zone:10s}: {value:.6f}")
+        zone_values = {}
+        for zone, value in zip(self.zones, threat_values, strict=True):
+            zone_values[zone] = float(value)
+        logger.info("Expected Threat values by zone: %s", zone_values)
 
         return self
 
@@ -268,7 +276,7 @@ class ExpectedThreatCalculator:
             df = pass_df.copy()
 
         # Map zones to threat values
-        zone_to_threat = dict(zip(self.zones, self.zone_threat_values))
+        zone_to_threat = dict(zip(self.zones, self.zone_threat_values, strict=True))
 
         # Ensure stage and period are strings for operations (may be Categorical)
         df["stage"] = df["stage"].astype(str)
@@ -315,18 +323,19 @@ def aggregate_xt_features(
     Returns:
         DataFrame with xT features per checkpoint
     """
-    # Calculate threat added for all passes
-    passes_with_threat = xt_calculator.calculate_threat_added(pass_df)
+    if xt_calculator.zone_threat_values is None:
+        raise ValueError("xT calculator must be fit before aggregating features")
 
     # Convert to pandas for operations
     if use_gpu and CUDF_AVAILABLE:
-        passes_pd = passes_with_threat.to_pandas()
+        passes_pd = pass_df.to_pandas().copy()
         checkpoint_pd = checkpoint_df.to_pandas()
     else:
-        passes_pd = passes_with_threat
+        passes_pd = pass_df.copy()
         checkpoint_pd = checkpoint_df.copy()
 
     group_keys = ["player_appearance_id", "checkpoint_min", "checkpoint_period"]
+    zone_to_threat = dict(zip(xt_calculator.zones, xt_calculator.zone_threat_values, strict=True))
 
     # Cross-join passes with checkpoints per player, then apply temporal filters.
     # Each pass row is duplicated for every checkpoint of the same player.
@@ -339,6 +348,34 @@ def aggregate_xt_features(
     # Ensure period columns are strings for comparison (may be Categorical dtype)
     merged["period"] = merged["period"].astype(str)
     merged["checkpoint_period"] = merged["checkpoint_period"].astype(str)
+    merged["origin_threat"] = merged["stage"].map(zone_to_threat)
+
+    def aggregate_window(mask: pd.Series, prefix: str) -> pd.DataFrame:
+        # Destination zones must be inferred after checkpoint filtering; otherwise
+        # shift(-1) can pull a future pass into an earlier checkpoint feature.
+        window = merged[mask].copy()
+        if window.empty:
+            return pd.DataFrame(columns=[*group_keys, f"{prefix}_xt_added", f"{prefix}_xt_count"])
+
+        sort_cols = [*group_keys, "period", "minute"]
+        if "id" in window.columns:
+            sort_cols.append("id")
+        window = window.sort_values(sort_cols)
+        window["dest_zone"] = window.groupby(group_keys, sort=False)["stage"].shift(-1)
+        window["dest_threat"] = window["dest_zone"].map(zone_to_threat)
+        window["threat_added"] = window["dest_threat"] - window["origin_threat"]
+        window = window.dropna(subset=["threat_added"])
+
+        return (
+            window.groupby(group_keys, sort=False)
+            .agg(
+                **{
+                    f"{prefix}_xt_added": ("threat_added", "sum"),
+                    f"{prefix}_xt_count": ("threat_added", "count"),
+                }
+            )
+            .reset_index()
+        )
 
     # --- Cumulative window: minute_in <= minute <= checkpoint_min, same period ---
     cumul_mask = (
@@ -346,12 +383,7 @@ def aggregate_xt_features(
         & (merged["minute"] >= merged["minute_in"])
         & (merged["minute"] <= merged["checkpoint_min"])
     )
-    cumul_agg = (
-        merged[cumul_mask]
-        .groupby(group_keys, sort=False)
-        .agg(cumul_xt_added=("threat_added", "sum"), cumul_xt_count=("threat_added", "count"))
-        .reset_index()
-    )
+    cumul_agg = aggregate_window(cumul_mask, "cumul")
 
     # --- Rolling 15-min window: checkpoint_min-15 < minute <= checkpoint_min, same period ---
     last15_mask = (
@@ -359,12 +391,7 @@ def aggregate_xt_features(
         & (merged["minute"] > merged["checkpoint_min"] - 15)
         & (merged["minute"] <= merged["checkpoint_min"])
     )
-    last15_agg = (
-        merged[last15_mask]
-        .groupby(group_keys, sort=False)
-        .agg(last15_xt_added=("threat_added", "sum"), last15_xt_count=("threat_added", "count"))
-        .reset_index()
-    )
+    last15_agg = aggregate_window(last15_mask, "last15")
 
     # Merge aggregated features back to checkpoint_pd; fill 0 where no passes found
     checkpoint_pd = checkpoint_pd.merge(cumul_agg, on=group_keys, how="left")

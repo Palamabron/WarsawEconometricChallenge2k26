@@ -1,0 +1,253 @@
+{
+  "checkpoint_rates": {
+    "H1_15": 0.08957415565345081,
+    "H1_30": 0.07058823529411765,
+    "H1_45": 0.057352941176470586,
+    "H2_15": 0.039705882352941174,
+    "H2_30": 0.03676470588235294,
+    "H2_45": 0.046511627906976744,
+    "ET1_15": 0.023809523809523808
+  },
+  "position_rates": {
+    "A": 0.12520325203252033,
+    "M": 0.06732976281560826,
+    "D": 0.030497592295345103,
+    "G": 0.0
+  },
+  "pass_accuracy": {
+    "bottom": 0.8248024733768464,
+    "middle": 0.8816201544992692,
+    "top": 0.7626582278481012
+  },
+  "pressure_turnover": {
+    "bottom": 0.4152900499423742,
+    "middle": 0.35160233066278224,
+    "top": 0.42811579980372916
+  },
+  "best_models": [
+    "xgboost",
+    "extra_trees"
+  ],
+  "metrics": [
+    {
+      "model": "xgboost",
+      "roc_auc": 0.6522749677769791,
+      "pr_auc": 0.12398426048694625,
+      "brier": 0.08522015888077791
+    },
+    {
+      "model": "extra_trees",
+      "roc_auc": 0.6694675811652505,
+      "pr_auc": 0.11288719679612362,
+      "brier": 0.061045179964273416
+    },
+    {
+      "model": "random_forest",
+      "roc_auc": 0.6830110030925096,
+      "pr_auc": 0.11030813569364084,
+      "brier": 0.05751181927813228
+    },
+    {
+      "model": "logistic",
+      "roc_auc": 0.5841992410522036,
+      "pr_auc": 0.08873311473202701,
+      "brier": 0.18782491214708616
+    }
+  ],
+  "top_importances": [
+    {
+      "model": "extra_trees",
+      "feature": "cumul_pass_bottom_share",
+      "importance": 0.021246776177888622
+    },
+    {
+      "model": "extra_trees",
+      "feature": "last15_pass_bottom_share",
+      "importance": 0.01845365412496859
+    },
+    {
+      "model": "extra_trees",
+      "feature": "is_defender",
+      "importance": 0.014487693796035345
+    },
+    {
+      "model": "extra_trees",
+      "feature": "is_attacker",
+      "importance": 0.014400082981574334
+    },
+    {
+      "model": "extra_trees",
+      "feature": "position_D",
+      "importance": 0.01424867596542213
+    },
+    {
+      "model": "extra_trees",
+      "feature": "position_A",
+      "importance": 0.013706223989034988
+    },
+    {
+      "model": "extra_trees",
+      "feature": "cumul_pass_top_share",
+      "importance": 0.012325875609497
+    },
+    {
+      "model": "extra_trees",
+      "feature": "formation_3-4-3",
+      "importance": 0.0111551957225378
+    },
+    {
+      "model": "extra_trees",
+      "feature": "is_home",
+      "importance": 0.010944568743526551
+    },
+    {
+      "model": "extra_trees",
+      "feature": "formation_4-4-2",
+      "importance": 0.010465947624370081
+    },
+    {
+      "model": "extra_trees",
+      "feature": "cumul_pressure_retention",
+      "importance": 0.010123423155424837
+    },
+    {
+      "model": "extra_trees",
+      "feature": "formation_4-3-3",
+      "importance": 0.010090398351249794
+    },
+    {
+      "model": "xgboost",
+      "feature": "cumul_pass_bottom_share",
+      "importance": 0.028989652171730995
+    },
+    {
+      "model": "xgboost",
+      "feature": "position_D",
+      "importance": 0.014807626605033875
+    },
+    {
+      "model": "xgboost",
+      "feature": "last15_pass_bottom_share",
+      "importance": 0.01452905684709549
+    },
+    {
+      "model": "xgboost",
+      "feature": "last15_hsr",
+      "importance": 0.011917052790522575
+    },
+    {
+      "model": "xgboost",
+      "feature": "cumul_pressure_quality",
+      "importance": 0.011809526942670345
+    },
+    {
+      "model": "xgboost",
+      "feature": "recent_distance_ratio",
+      "importance": 0.011759060434997082
+    },
+    {
+      "model": "xgboost",
+      "feature": "is_defender",
+      "importance": 0.011518867686390877
+    },
+    {
+      "model": "xgboost",
+      "feature": "position_delta_last15_distance",
+      "importance": 0.011245615780353546
+    },
+    {
+      "model": "xgboost",
+      "feature": "last15_hsr_event_count",
+      "importance": 0.011239362880587578
+    },
+    {
+      "model": "xgboost",
+      "feature": "checkpoint_abs_min",
+      "importance": 0.01118195615708828
+    },
+    {
+      "model": "xgboost",
+      "feature": "cumul_hsr_event_count",
+      "importance": 0.010970602743327618
+    },
+    {
+      "model": "xgboost",
+      "feature": "pass_xt_per_pass",
+      "importance": 0.010607682168483734
+    }
+  ],
+  "top_correlations": [
+    {
+      "feature": "is_attacker",
+      "correlation": 0.1323571052298354
+    },
+    {
+      "feature": "cumul_pass_bottom_share",
+      "correlation": -0.1316731592169697
+    },
+    {
+      "feature": "last15_pass_bottom_share",
+      "correlation": -0.12697307687927517
+    },
+    {
+      "feature": "cumul_pass_top_share",
+      "correlation": 0.11367000029819695
+    },
+    {
+      "feature": "cumul_run_top_share",
+      "correlation": 0.11219244859409591
+    },
+    {
+      "feature": "cumul_pass_receiver_diversity",
+      "correlation": -0.10551627020488626
+    },
+    {
+      "feature": "recent_hsr_ratio",
+      "correlation": 0.10409458966819767
+    },
+    {
+      "feature": "cumul_pressure_top_share",
+      "correlation": 0.10375672966721569
+    },
+    {
+      "feature": "cumul_pass_count",
+      "correlation": -0.10210804570394
+    },
+    {
+      "feature": "cumul_pressure_quality",
+      "correlation": -0.09844605709951114
+    },
+    {
+      "feature": "minutes_played_at_checkpoint",
+      "correlation": -0.09804310325180829
+    },
+    {
+      "feature": "last15_pass_top_share",
+      "correlation": 0.09751814252072204
+    },
+    {
+      "feature": "recent_distance_ratio",
+      "correlation": 0.0968196177377177
+    },
+    {
+      "feature": "last15_run_top_share",
+      "correlation": 0.09611051884251945
+    },
+    {
+      "feature": "is_defender",
+      "correlation": -0.088330852045541
+    },
+    {
+      "feature": "shots_per_90_so_far",
+      "correlation": 0.08220948254945035
+    },
+    {
+      "feature": "checkpoint_abs_min",
+      "correlation": -0.08183744539095943
+    },
+    {
+      "feature": "last15_press_applied_count",
+      "correlation": 0.08086884393774933
+    }
+  ]
+}

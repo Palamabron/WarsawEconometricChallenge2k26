@@ -1,133 +1,93 @@
-# Warsaw Econometric Challenge 2026 - Football Goal-Scoring Prediction
+# Warsaw Econometric Challenge 2026
 
-Binary classification: predict whether a player scores a goal after a 15-minute match checkpoint. Dataset: 3,486 observations, 5.82% positive class, 31 matches.
+Football goal-scoring prediction pipeline for WEC2026. The task is rare-event binary classification: predict whether a player scores after a 15-minute checkpoint.
+
+The current modeling path is fold-safe: event features are built inside fixture-grouped cross-validation folds, temporal boundaries use absolute match time, and known leakage fields are excluded before training.
 
 ## Setup
 
-Requires [uv](https://github.com/astral-sh/uv).
+This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
 
 ```bash
 uv venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate.bat
-make install               # core deps
-make install-dev           # add ruff, mypy, pytest
-make install-gpu           # add RAPIDS cuDF (CUDA 11.8+ required)
+source .venv/bin/activate
+make install-dev
 ```
 
-## Usage
+For optional RAPIDS/cuDF support:
 
 ```bash
-python main.py             # run pipeline
-python main.py --optimize  # with Optuna hyperparameter search
+make install-gpu
 ```
 
-## Development
+## Common Commands
 
 ```bash
-make format      # ruff format
-make lint        # ruff check
+make format      # ruff check --fix + ruff format
+make lint        # ruff lint + format check
 make type-check  # mypy
 make test        # pytest
-make test-cov    # pytest with coverage
-make all         # all of the above
-make clean       # remove cache artifacts
+make all         # lint, type-check, test
 ```
 
-## Project Structure
+Run the main report-grade experiment:
 
+```bash
+python run_experiment.py --preset smoke
+python run_experiment.py --preset practical --hpo-trials 20
 ```
-src/
-  config.py                    # configuration loader
-  data_ingestion.py            # data loading (CPU/GPU auto-detect)
-  feature_factory.py           # feature engineering orchestrator
-  features/
-    expected_threat.py         # three-zone Markov xT model
-    press_resistance.py        # behavior under pressure metrics
-    physical_metrics.py        # workload ratios, fatigue, speed decay
-  models/
-    focal_loss.py              # custom focal loss (gamma=2.0, alpha=0.94)
-  validation/
-    cross_validator.py         # fixture-based GroupKFold
-    leakage_checks.py          # temporal integrity validation
-data/                          # CSV datasets
-outputs/                       # predictions, models, reports
-config.yaml                    # model and pipeline configuration
-main.py                        # entry point
+
+The older baseline entry point is still available:
+
+```bash
+python main.py
+python main.py --optimize
+```
+
+## Repository Map
+
+```text
+data/                    Competition CSV files
+src/config.py            Pydantic-validated YAML config loader
+src/data_ingestion.py    pandas/cuDF data loading helpers
+src/temporal_features.py Fold-safe temporal feature builder
+src/preprocessing.py     Train-only categorical encoding utilities
+src/features/            xT, pressure, and physical feature helpers
+src/validation/          Leakage checks and grouped CV
+run_experiment.py        Main experiment and report runner
+main.py                  Older baseline pipeline
+reports/                 Report sources, PDFs, and generated figures
+tests/                   Pytest coverage for temporal and modeling helpers
 ```
 
 ## Data
 
-| File | Description | Rows |
-|------|-------------|------|
-| `players_quarters_final.csv` | Checkpoint observations (target: `scored_after`) | 3,486 |
-| `player_appearance_pass.csv` | Pass events | 29,795 |
-| `player_appearance_run.csv` | Physical tracking | 35,133 |
-| `player_appearance_shot_limited.csv` | Shot attempts | 780 |
-| `player_appearance_behaviour_under_pressure.csv` | Pressure situations | 12,185 |
+| File | Role |
+| --- | --- |
+| `players_quarters_final.csv` | Checkpoint modeling table with target `scored_after` |
+| `player_appearance_pass.csv` | Pass events |
+| `player_appearance_run.csv` | High-speed run and sprint events |
+| `player_appearance_shot_limited.csv` | Shot context without full outcome data |
+| `player_appearance_behaviour_under_pressure.csv` | Pressed-player decisions and pressing-player IDs |
 
-## Features Engineered
+## Leakage Rules
 
-**Expected Threat (xT):** Three-zone Markov model (bottom/middle/top) computing threat added per pass, aggregated as rolling 15-min and cumulative totals.
-
-**Press Resistance:** Retention rate, progressive evasion count, pass angle distortion, and expected vs actual turnovers under defensive pressure.
-
-**Physical Metrics:** Acute:chronic workload ratio, positional momentum deviation, speed decay, run type diversity, fatigue/momentum indicators.
-
-## Model Architecture
-
-Baseline: XGBoost with `scale_pos_weight`.
-
-Planned: TabPFN (zero-shot Bayesian transformer) + CatBoost with focal loss, stacked via logistic regression meta-learner.
-
-## Data Leakage Safeguards
-
-- All event features filtered to `event_minute <= checkpoint_minute`
-- Shot outcome columns excluded from features
-- Cross-validation grouped by `fixture_id` (no match overlap between folds)
-- Scaler fit exclusively on training data within each CV fold
+- Compare event times to checkpoints using absolute match time, because minutes restart by period.
+- Fit encoders, imputers, feature builders, thresholds, and meta-learners on training folds only.
+- Group cross-validation by `fixture_id`; one fixture must not appear in both train and validation.
+- Do not use future substitution fields, shot outcomes, or goal/result-like columns as predictors.
 
 ## Configuration
 
-Key settings in `config.yaml`:
+Edit `config.yaml` for data paths, CV settings, feature settings, and model options. The loader validates the main sections with pydantic while keeping dotted-key access for existing code:
 
-```yaml
-cross_validation:
-  n_folds: 5
-  group_by: "fixture_id"
+```python
+from src.config import get_config
 
-models:
-  catboost:
-    grow_policy: "Lossguide"  # required for custom loss on GPU
-  focal_loss:
-    gamma: 2.0
-    alpha: 0.94
-
-hyperparameter_optimization:
-  enabled: false
-  n_trials: 100
+config = get_config()
+n_folds = config.get("cross_validation.n_folds")
 ```
 
-## GPU Support
+## Outputs
 
-GPU (RTX 4090) accelerates feature engineering ~20x via RAPIDS cuDF. Auto-detected at runtime; falls back to pandas on CPU.
-
-```bash
-make install-gpu
-python -c "import cudf; print('GPU ready')"
-```
-
-## Performance Targets
-
-| Metric | Target | Baseline (dummy) |
-|--------|--------|-----------------|
-| F1 Score | > 0.30 | 0.11 |
-| PR-AUC | > 0.40 | - |
-| Brier Score | < 0.06 | - |
-
-Expected runtime: ~45 min (ARM CPU) / ~15 min (RTX 4090).
-
-## References
-
-- Expected Threat: Karun Singh, https://karun.in/blog/expected-threat.html
-- Focal Loss: Lin et al., 2017, https://arxiv.org/abs/1708.02002
-- TabPFN: Hollmann et al., 2023, https://arxiv.org/abs/2207.01848
+Runtime outputs go under `outputs/`. Report artifacts live under `reports/` and `reports/figures/`.

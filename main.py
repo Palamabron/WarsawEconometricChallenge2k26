@@ -6,12 +6,14 @@ Usage:
     python main.py             # Run with default parameters
 """
 
-import argparse
+import logging
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import tyro
 from sklearn.metrics import (
     average_precision_score,
     classification_report,
@@ -29,49 +31,59 @@ from src.validation.leakage_checks import LeakageValidator
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+logger = logging.getLogger(__name__)
 
-def main(args):
+
+@dataclass(frozen=True)
+class CliArgs:
+    """Command-line options for the baseline WEC2026 pipeline."""
+
+    optimize: bool = False
+    config: str = "config.yaml"
+    log_level: str = "INFO"
+
+
+def configure_logging(level: str) -> None:
+    """Configure process-wide logging for command-line runs."""
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
+def main(args: CliArgs) -> None:
     """Main pipeline execution"""
 
-    print("=" * 80)
-    print("WARSAW ECONOMETRIC CHALLENGE 2026")
-    print("Football Goal-Scoring Prediction Pipeline")
-    print("=" * 80)
+    logger.info("Starting WEC2026 football goal-scoring prediction pipeline")
 
     # 1. Load configuration
     config = get_config(args.config)
-    print(f"\nConfiguration loaded:")
-    print(f"  GPU available: {config.use_gpu}")
-    print(f"  CV folds: {config.n_folds}")
-    print(f"  Random seed: {config.random_state}")
+    logger.info(
+        "Configuration loaded: gpu_available=%s cv_folds=%s random_seed=%s",
+        config.use_gpu,
+        config.n_folds,
+        config.random_state,
+    )
 
     # 2. Load data
-    print("\n" + "=" * 80)
-    print("STEP 1: Data Loading")
-    print("=" * 80)
+    logger.info("Step 1: loading data")
 
     data_loader = DataIngestion(use_gpu=config.use_gpu, config_path=args.config)
     checkpoint_df, event_dfs = data_loader.load_all()
 
     # 3. Engineer features
-    print("\n" + "=" * 80)
-    print("STEP 2: Feature Engineering")
-    print("=" * 80)
+    logger.info("Step 2: engineering features")
 
     factory = FeatureFactory(config_path=args.config, use_gpu=config.use_gpu)
     feature_df = factory.engineer_features(checkpoint_df, event_dfs)
 
     # 4. Run leakage checks
-    print("\n" + "=" * 80)
-    print("STEP 3: Leakage Validation")
-    print("=" * 80)
+    logger.info("Step 3: validating leakage constraints")
 
     LeakageValidator.validate_temporal_boundaries(feature_df, checkpoint_df, event_dfs)
 
     # 5. Prepare data for modeling
-    print("\n" + "=" * 80)
-    print("STEP 4: Data Preparation")
-    print("=" * 80)
+    logger.info("Step 4: preparing model matrix")
 
     # Filter to valid observations (player on pitch)
     feature_df = LeakageValidator.validate_player_on_pitch(feature_df)
@@ -112,27 +124,27 @@ def main(args):
     for col in categorical_cols:
         X[col] = X[col].astype("category").cat.codes
 
-    print(f"\nDataset prepared:")
-    print(f"  Samples: {len(X)}")
-    print(f"  Features: {len(feature_cols)}")
-    print(f"  Positive class: {y.sum()} ({(y.sum() / len(y)) * 100:.2f}%)")
-    print(f"  Unique matches: {groups.nunique()}")
+    logger.info(
+        "Dataset prepared: samples=%s features=%s positive_rate=%.2f%% unique_matches=%s",
+        len(X),
+        len(feature_cols),
+        (y.sum() / len(y)) * 100,
+        groups.nunique(),
+    )
 
     # 6. Cross-validation
-    print("\n" + "=" * 80)
-    print("STEP 5: Cross-Validation")
-    print("=" * 80)
+    logger.info("Step 5: running cross-validation")
 
     cv = create_cross_validator(args.config)
 
     # Baseline model - simple XGBoost
-    print("\nTraining baseline XGBoost model...")
+    logger.info("Training baseline XGBoost model")
 
     oof_predictions = np.zeros(len(X))
     fold_scores = []
 
     for fold, (train_idx, val_idx) in enumerate(cv.split(X, y, groups), 1):
-        print(f"\n--- Fold {fold} ---")
+        logger.info("Running fold %s", fold)
 
         # Split data
         X_train, X_val = X.iloc[train_idx].copy(), X.iloc[val_idx].copy()
@@ -187,18 +199,25 @@ def main(args):
             }
         )
 
-        print(f"  F1 Score: {fold_f1:.4f}")
-        print(f"  PR-AUC: {fold_prauc:.4f}")
-        print(f"  Optimal threshold: {best_threshold:.4f}")
+        logger.info(
+            "Fold %s metrics: f1=%.4f pr_auc=%.4f threshold=%.4f",
+            fold,
+            fold_f1,
+            fold_prauc,
+            best_threshold,
+        )
 
     # Overall performance
-    print("\n" + "=" * 80)
-    print("OVERALL CROSS-VALIDATION RESULTS")
-    print("=" * 80)
+    logger.info("Overall cross-validation results")
 
     scores_df = pd.DataFrame(fold_scores)
-    print(f"\nMean F1 Score: {scores_df['f1'].mean():.4f} (+/- {scores_df['f1'].std():.4f})")
-    print(f"Mean PR-AUC: {scores_df['pr_auc'].mean():.4f} (+/- {scores_df['pr_auc'].std():.4f})")
+    logger.info(
+        "Mean metrics: f1=%.4f +/- %.4f pr_auc=%.4f +/- %.4f",
+        scores_df["f1"].mean(),
+        scores_df["f1"].std(),
+        scores_df["pr_auc"].mean(),
+        scores_df["pr_auc"].std(),
+    )
 
     # Find optimal overall threshold
     precision, recall, thresholds = precision_recall_curve(y, oof_predictions)
@@ -209,17 +228,20 @@ def main(args):
     overall_f1 = f1_score(y, oof_pred_labels)
     overall_prauc = average_precision_score(y, oof_predictions)
 
-    print(f"\nOut-of-Fold Performance:")
-    print(f"  F1 Score: {overall_f1:.4f}")
-    print(f"  PR-AUC: {overall_prauc:.4f}")
-    print(f"  Optimal threshold: {best_overall_threshold:.4f}")
+    logger.info(
+        "Out-of-fold metrics: f1=%.4f pr_auc=%.4f threshold=%.4f",
+        overall_f1,
+        overall_prauc,
+        best_overall_threshold,
+    )
 
-    print("\n" + classification_report(y, oof_pred_labels, target_names=["No Goal", "Goal"]))
+    logger.info(
+        "Classification report:\n%s",
+        classification_report(y, oof_pred_labels, target_names=["No Goal", "Goal"]),
+    )
 
     # 7. Save results
-    print("\n" + "=" * 80)
-    print("STEP 6: Saving Results")
-    print("=" * 80)
+    logger.info("Step 6: saving results")
 
     output_dir = Path("outputs/predictions")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -238,22 +260,17 @@ def main(args):
 
     results_path = output_dir / "oof_predictions.csv"
     results_df.to_csv(results_path, index=False)
-    print(f"  ✓ Saved predictions to {results_path}")
+    logger.info("Saved predictions to %s", results_path)
 
     # Save scores
     scores_path = output_dir / "cv_scores.csv"
     scores_df.to_csv(scores_path, index=False)
-    print(f"  ✓ Saved CV scores to {scores_path}")
+    logger.info("Saved CV scores to %s", scores_path)
 
-    print("\n" + "=" * 80)
-    print("PIPELINE COMPLETE!")
-    print("=" * 80)
+    logger.info("Pipeline complete")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="WEC2026 Football Prediction Pipeline")
-    parser.add_argument("--optimize", action="store_true", help="Run hyperparameter optimization")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Path to config file")
-
-    args = parser.parse_args()
-    main(args)
+    cli_args = tyro.cli(CliArgs)
+    configure_logging(cli_args.log_level)
+    main(cli_args)

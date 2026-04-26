@@ -1,67 +1,81 @@
-.PHONY: help install install-dev install-gpu format fmt lint type-check types test test-cov clean all
+ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || pwd)
+PYTHON_PATHS := src tests
+UV_RUN := uv run --no-sync
+NB := $(shell test -d "$(ROOT)/notebooks" && find "$(ROOT)/notebooks" -type f -name "*.ipynb" 2>/dev/null)
+
+.PHONY: help sync-core sync-dev install install-dev install-gpu format fmt lint type-check types test test-cov all nb-format nb-lint nb-types
 
 help:
 	@echo "Warsaw Econometric Challenge 2026 - Makefile Commands"
 	@echo ""
 	@echo "Setup:"
-	@echo "  make install       Install core dependencies"
-	@echo "  make install-dev   Install with development tools"
-	@echo "  make install-gpu   Install with GPU support"
+	@echo "  make sync-core     Sync core dependencies with uv"
+	@echo "  make sync-dev      Sync development dependencies with uv"
+	@echo "  make install       Alias for sync-core"
+	@echo "  make install-dev   Alias for sync-dev"
+	@echo "  make install-gpu   Sync with GPU extras"
 	@echo ""
 	@echo "Code Quality:"
-	@echo "  make format        Format code with ruff"
-	@echo "  make lint          Lint code with ruff"
-	@echo "  make type-check    Run mypy type checking"
-	@echo "  make test          Run tests"
-	@echo "  make test-cov      Run tests with coverage report"
-	@echo "  make all           Run format, lint, type-check, and test"
+	@echo "  make fmt           Format and auto-fix Python code"
+	@echo "  make lint          Check Ruff linting and formatting"
+	@echo "  make types         Run mypy on src and tests"
 	@echo ""
-	@echo "Cleanup:"
-	@echo "  make clean         Remove cache and build artifacts"
+	@echo "Testing:"
+	@echo "  make test          Run pytest"
+	@echo "  make test-cov      Run pytest with coverage report"
+	@echo "  make all           Run lint, types, and test"
+	@echo ""
+	@echo "Notebooks:"
+	@echo "  make nb-format     Format notebooks via nbQA"
+	@echo "  make nb-lint       Lint notebooks via nbQA"
+	@echo "  make nb-types      Type-check notebooks via nbQA"
 
-install:
-	uv pip install -e .
+sync-core:
+	cd "$(ROOT)" && uv sync
 
-install-dev:
-	uv pip install -e ".[dev]"
+sync-dev:
+	cd "$(ROOT)" && uv sync --extra dev
+
+install: sync-core
+
+install-dev: sync-dev
 
 install-gpu:
-	uv pip install -e ".[gpu]"
+	cd "$(ROOT)" && uv sync --extra gpu
 
-format:
-	@echo "Formatting code with ruff..."
-	ruff format src/ tests/
-	ruff check --fix src/ tests/
-
-fmt: format
+format fmt:
+	cd "$(ROOT)" && $(UV_RUN) ruff check --fix $(PYTHON_PATHS)
+	cd "$(ROOT)" && $(UV_RUN) ruff format $(PYTHON_PATHS)
 
 lint:
-	@echo "Linting code with ruff..."
-	ruff check src/ tests/
+	cd "$(ROOT)" && $(UV_RUN) ruff check $(PYTHON_PATHS)
+	cd "$(ROOT)" && $(UV_RUN) ruff format --check $(PYTHON_PATHS)
 
-type-check:
-	@echo "Type checking with mypy..."
-	mypy src/
-
-types: type-check
+type-check types:
+	cd "$(ROOT)" && $(UV_RUN) mypy src tests
 
 test:
-	@echo "Running tests..."
-	pytest tests/ -v
+	cd "$(ROOT)" && $(UV_RUN) pytest
 
 test-cov:
-	@echo "Running tests with coverage..."
-	pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=html
+	cd "$(ROOT)" && $(UV_RUN) pytest --cov=src --cov-report=term-missing --cov-report=html
 	@echo "Coverage report generated in htmlcov/index.html"
 
-all: format lint type-check test
+all: lint types test
 
-clean:
-	@echo "Cleaning up..."
-	rm -rf __pycache__ .pytest_cache .mypy_cache .ruff_cache
-	rm -rf htmlcov/ .coverage
-	rm -rf dist/ build/ *.egg-info
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
-	@echo "Clean complete!"
+nb-format:
+	@if [ -z "$(NB)" ]; then echo "No notebooks to format."; else \
+		cd "$(ROOT)" && uv run --no-sync --with nbqa nbqa ruff $(NB) -- check --fix; \
+		cd "$(ROOT)" && uv run --no-sync --with nbqa nbqa ruff $(NB) -- format; \
+	fi
+
+nb-lint:
+	@if [ -z "$(NB)" ]; then echo "No notebooks to lint."; else \
+		cd "$(ROOT)" && uv run --no-sync --with nbqa nbqa ruff $(NB) -- check; \
+		cd "$(ROOT)" && uv run --no-sync --with nbqa nbqa ruff $(NB) -- format --check; \
+	fi
+
+nb-types:
+	@if [ -z "$(NB)" ]; then echo "No notebooks to type-check."; else \
+		cd "$(ROOT)" && uv run --no-sync --with nbqa nbqa mypy $(NB); \
+	fi

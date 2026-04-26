@@ -1,0 +1,101 @@
+{
+  "checkpoint_rates": {
+    "H1_15": 0.08957415565345081,
+    "H1_30": 0.07058823529411765,
+    "H1_45": 0.057352941176470586,
+    "H2_15": 0.039705882352941174,
+    "H2_30": 0.03676470588235294,
+    "H2_45": 0.046511627906976744,
+    "ET1_15": 0.023809523809523808
+  },
+  "position_rates": {
+    "A": 0.12520325203252033,
+    "M": 0.06732976281560826,
+    "D": 0.030497592295345103,
+    "G": 0.0
+  },
+  "pass_accuracy": {
+    "bottom": 0.8248024733768464,
+    "middle": 0.8816201544992692,
+    "top": 0.7626582278481012
+  },
+  "pressure_turnover": {
+    "bottom": 0.4152900499423742,
+    "middle": 0.35160233066278224,
+    "top": 0.42811579980372916
+  },
+  "top_correlations": [
+    {
+      "feature": "is_attacker",
+      "correlation": 0.1323571052298354
+    },
+    {
+      "feature": "cumul_pass_bottom_share",
+      "correlation": -0.1316731592169697
+    },
+    {
+      "feature": "attacker_x_last15_pass_top_share",
+      "correlation": 0.12860119680011337
+    },
+    {
+      "feature": "last15_pass_bottom_share",
+      "correlation": -0.12697307687927517
+    },
+    {
+      "feature": "cumul_pass_bottom_share_smoothed",
+      "correlation": -0.11476257965717523
+    },
+    {
+      "feature": "cumul_pass_top_share",
+      "correlation": 0.11367000029819695
+    },
+    {
+      "feature": "cumul_run_top_share",
+      "correlation": 0.11219244859409591
+    },
+    {
+      "feature": "last15_pass_bottom_share_smoothed",
+      "correlation": -0.10804508591828658
+    },
+    {
+      "feature": "cumul_pass_top_share_smoothed",
+      "correlation": 0.10712001690863532
+    },
+    {
+      "feature": "cumul_pass_receiver_diversity",
+      "correlation": -0.10551627020488626
+    },
+    {
+      "feature": "recent_hsr_ratio",
+      "correlation": 0.10409458966819767
+    },
+    {
+      "feature": "cumul_pressure_top_share",
+      "correlation": 0.10375672966721569
+    },
+    {
+      "feature": "cumul_pass_count",
+      "correlation": -0.10210804570394
+    },
+    {
+      "feature": "cumul_pressure_top_share_smoothed",
+      "correlation": 0.10162044544484868
+    },
+    {
+      "feature": "cumul_pressure_quality",
+      "correlation": -0.09843123306571712
+    },
+    {
+      "feature": "minutes_played_at_checkpoint",
+      "correlation": -0.09804310325180829
+    },
+    {
+      "feature": "last15_pass_top_share",
+      "correlation": 0.09751814252072204
+    },
+    {
+      "feature": "recent_distance_ratio",
+      "correlation": 0.0968196177377177
+    }
+  ]
+}

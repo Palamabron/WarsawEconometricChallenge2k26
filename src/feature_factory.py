@@ -5,6 +5,7 @@ Coordinates Expected Threat, Press Resistance, and Physical Metrics feature
 generation with strict temporal integrity enforcement.
 """
 
+import logging
 import warnings
 from typing import Union
 
@@ -16,6 +17,8 @@ from src.features.expected_threat import ExpectedThreatCalculator, aggregate_xt_
 from src.features.physical_metrics import calculate_fatigue_indicators, calculate_physical_features
 from src.features.press_resistance import calculate_press_resistance_features
 from src.preprocessing import CategoricalEncoder
+
+logger = logging.getLogger(__name__)
 
 try:
     import cudf
@@ -49,7 +52,7 @@ class FeatureFactory:
             warnings.warn("GPU requested but cuDF not available. Using pandas.")
             self.use_gpu = False
 
-        print(f"FeatureFactory initialized (GPU={self.use_gpu})")
+        logger.info("FeatureFactory initialized: gpu=%s", self.use_gpu)
 
     def engineer_features(
         self,
@@ -70,9 +73,7 @@ class FeatureFactory:
         Returns:
             Augmented feature matrix
         """
-        print("=" * 60)
-        print("Starting Feature Engineering Pipeline")
-        print("=" * 60)
+        logger.info("Starting feature engineering pipeline")
 
         # Make copies to avoid modifying originals
         if self.use_gpu:
@@ -85,31 +86,29 @@ class FeatureFactory:
         # If fold indices provided, filter to training data only
         if fold_indices is not None:
             df = df.iloc[fold_indices].copy()
-            print(f"Filtered to {len(df)} training observations")
+            logger.info("Filtered to %s training observations", len(df))
 
         # 1. Expected Threat Features
-        print("\n1. Computing Expected Threat features...")
+        logger.info("Computing Expected Threat features")
         df = self._add_expected_threat_features(df, events)
 
         # 2. Press Resistance Features
-        print("\n2. Computing Press Resistance features...")
+        logger.info("Computing Press Resistance features")
         df = self._add_press_resistance_features(df, events)
 
         # 3. Physical Metrics Features
-        print("\n3. Computing Physical Metrics features...")
+        logger.info("Computing Physical Metrics features")
         df = self._add_physical_metrics_features(df, events)
 
         # 4. Derived Features
-        print("\n4. Computing Derived features...")
+        logger.info("Computing derived features")
         df = self._add_derived_features(df)
 
         # 5. Feature Validation
-        print("\n5. Validating features...")
+        logger.info("Validating engineered features")
         df = self._validate_features(df, checkpoint_df)
 
-        print("\n" + "=" * 60)
-        print(f"Feature engineering complete: {df.shape[1]} total features")
-        print("=" * 60)
+        logger.info("Feature engineering complete: total_features=%s", df.shape[1])
 
         # Convert back to cuDF if needed
         if self.use_gpu:
@@ -140,7 +139,7 @@ class FeatureFactory:
             # Aggregate features per checkpoint
             df = aggregate_xt_features(events["pass"], df, xt_calc, use_gpu=False)
 
-            print(f"  ✓ Added {4} Expected Threat features")
+            logger.info("Added %s Expected Threat features", 4)
 
         except Exception as e:
             warnings.warn(f"Failed to compute Expected Threat features: {e}")
@@ -173,7 +172,7 @@ class FeatureFactory:
                 use_gpu=False,
             )
 
-            print(f"  ✓ Added {10} Press Resistance features")
+            logger.info("Added %s Press Resistance features", 10)
 
         except Exception as e:
             warnings.warn(f"Failed to compute Press Resistance features: {e}")
@@ -202,7 +201,7 @@ class FeatureFactory:
                 ),
             )
 
-            print(f"  ✓ Added {9} Physical Metrics features")
+            logger.info("Added %s Physical Metrics features", 9)
 
         except Exception as e:
             warnings.warn(f"Failed to compute Physical Metrics features: {e}")
@@ -245,7 +244,7 @@ class FeatureFactory:
         df["shot_accuracy"] = df["cumul_shots_on_target"] / (df["cumul_shots"] + 1)
         df["shots_under_pressure_ratio"] = df["cumul_shots_under_press"] / (df["cumul_shots"] + 1)
 
-        print(f"  ✓ Added {13} Derived features")
+        logger.info("Added %s derived features", 13)
 
         return df
 
@@ -288,7 +287,7 @@ class FeatureFactory:
             else original_df.to_pandas().columns
         )
         new_features = set(df.columns) - orig_cols
-        print(f"  ✓ Created {len(new_features)} new features")
+        logger.info("Created %s new features", len(new_features))
 
         # Validate no leakage indicators
         forbidden_keywords = ["outcome", "result", "goal", "scored"]

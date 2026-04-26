@@ -56,8 +56,9 @@ uv.lock
 Thumbs.db
 
 # Project specific
-outputs/
+CLAUDE.md
 graphify-out/
+.cache/
 *.log
 *.csv~
 .pytest_cache/
@@ -76,3 +77,13 @@ catboost_info/
 *.h5
 *.pt
 *.pth
+
+# Track pipeline outputs (override model-artifact ignores in this tree only)
+!outputs/**/*.pkl
+!outputs/**/*.joblib
+!outputs/**/*.h5
+!outputs/**/*.pt
+!outputs/**/*.pth
+
+# Oversized for GitHub (100 MiB hard limit); regenerate locally or use Git LFS
+**/fold_models.joblib

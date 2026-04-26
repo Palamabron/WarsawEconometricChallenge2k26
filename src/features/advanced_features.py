@@ -8,9 +8,13 @@ Top predictors identified:
 - position features
 """
 
+import logging
+
 import numpy as np
 
 from src.types import DataFrame
+
+logger = logging.getLogger(__name__)
 
 try:
     import cudf
@@ -392,19 +396,19 @@ def add_all_advanced_features(
     """
     Add all advanced features.
     """
-    print("Adding shot quality features...")
+    logger.info("Adding shot quality features")
     checkpoint_df = add_shot_quality_features(checkpoint_df, event_dfs["shot"], use_gpu)
 
-    print("Adding temporal trends...")
+    logger.info("Adding temporal trends")
     checkpoint_df = add_temporal_trends(checkpoint_df, use_gpu)
 
-    print("Adding pressure intensity features...")
+    logger.info("Adding pressure intensity features")
     checkpoint_df = add_pressure_intensity_features(checkpoint_df, event_dfs["pressure"], use_gpu)
 
-    print("Adding position context features...")
+    logger.info("Adding position context features")
     checkpoint_df = add_position_context_features(checkpoint_df, use_gpu)
 
-    print("Adding interaction features...")
+    logger.info("Adding interaction features")
     checkpoint_df = add_interaction_features(checkpoint_df, use_gpu)
 
     return checkpoint_df

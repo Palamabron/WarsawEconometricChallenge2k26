@@ -1,133 +1,174 @@
-# Warsaw Econometric Challenge 2026 - Project Documentation
+# Warsaw Econometric Challenge 2026 - Agent Guide
 
-## Project Overview
-This project contains data and analysis for the Warsaw Econometric Challenge 2026 (WEC2026). The challenge focuses on football player performance analysis using tracking data and event data from matches.
+## Project Purpose
 
-## Project Structure
+This repository builds a football goal-scoring prediction pipeline for WEC2026. The task is rare-event binary classification: predict whether a player scores after a 15-minute checkpoint. The main table has 3,486 checkpoint observations across 31 fixtures, with roughly 5.8% positives.
 
-```
+The project is not just raw data anymore. It contains fold-safe temporal feature engineering, leakage validation, grouped cross-validation, modeling experiments, and a LaTeX/PDF report with generated figures.
+
+## Repository Map
+
+```text
 WarsawEconometricChallenge2k26/
-├── data/                                                # Folder with datasets
-│   ├── player_appearance_run.csv                       # Player running metrics
-│   ├── player_appearance_pass.csv                      # Player passing data
-│   ├── player_appearance_shot_limited.csv              # Player shooting data
-│   ├── player_appearance_behaviour_under_pressure.csv  # Player behavior under pressure
-│   └── players_quarters_final.csv                      # Player statistics per quarter
-├── WEC2026_Problem_description.pdf                     # Official problem statement
-├── WEC2026_data_description.pdf                        # Data dictionary and descriptions
-├── WEC_2026_presentation.pdf                           # Competition presentation
-└── README.md                                            # Basic project info
+├── data/                         # Raw CSV competition data
+├── src/
+│   ├── config.py                 # YAML config loader and GPU detection
+│   ├── data_ingestion.py         # pandas/cuDF data loading and schema handling
+│   ├── temporal_features.py      # Current fold-safe temporal feature builder
+│   ├── feature_factory.py        # Older feature engineering orchestrator
+│   ├── features/                 # xT, pressure, and physical feature helpers
+│   ├── models/focal_loss.py      # Custom focal-loss utilities
+│   └── validation/               # Leakage checks and fixture-grouped CV
+├── tests/                        # pytest coverage for feature, leakage, and CV behavior
+├── scripts/create_eda_plots.py   # Regenerates report figures and summary CSV/JSON files
+├── run_experiment.py             # Main report-grade experiment runner
+├── main.py                       # Simpler baseline pipeline entry point
+├── config.yaml                   # Data paths, CV, model, and feature settings
+├── reports/                      # Problem PDFs, LaTeX report, generated figures
+├── pyproject.toml                # Python 3.12 project metadata and tool config
+└── Makefile                      # Setup, lint, type-check, test, cleanup commands
 ```
+
+## Setup And Commands
+
+Use Python 3.12 and `uv`.
+
+```bash
+uv venv
+source .venv/bin/activate
+make install-dev
+```
+
+Common commands:
+
+```bash
+make format      # ruff format + ruff check --fix on src/ and tests/
+make lint        # ruff check src/ tests/
+make type-check  # mypy src/
+make test        # pytest tests/ -v
+make test-cov    # pytest with coverage
+make all         # format, lint, type-check, test
+```
+
+Pipeline and analysis commands:
+
+```bash
+python main.py
+python main.py --optimize
+python run_experiment.py --preset smoke
+python run_experiment.py --preset practical --hpo-trials 20 --include-autogluon
+python scripts/create_eda_plots.py
+```
+
+`outputs/` is the default runtime artifact directory for predictions, models, and experiment outputs. The report artifacts currently live under `reports/` and `reports/figures/`.
 
 ## Data Files
 
-### 1. player_appearance_run.csv
-Contains player running/physical metrics:
-- **id**: Unique run event identifier
-- **period**: Game period (half_1, half_2)
-- **stage**: Field position (top, middle, bottom)
-- **possession**: Possession ID
-- **run_type**: Type of run (e.g., "hsr" - high speed running)
-- **minute**: Minute of the event
-- **min_speed**, **max_speed**: Speed metrics
-- **distance**: Distance covered
-- **player_appearance_id**: Links to player appearance
+The primary join key across event files is `player_appearance_id`. Each appearance is a player in one fixture; `fixture_id` identifies the match and must be used for grouped validation.
 
-### 2. player_appearance_pass.csv
-Contains passing events:
-- **id**: Unique pass identifier
-- **period**: Game period
-- **player_appearance_id**: Passing player
-- **addressee_player_appearance_id**: Receiving player
-- **accurate**: Boolean indicating pass accuracy
-- **minute**: Minute of the pass
-- **stage**: Field position
 
-### 3. player_appearance_shot_limited.csv
-Contains shooting events:
-- **id**: Unique shot identifier
-- **period**: Game period
-- **player_appearance_id**: Shooting player
-- **body_part**: Body part used (e.g., "right_foot", "head")
-- **technique**: Shot technique (e.g., "normal", "lob")
-- **play_pattern**: Context (e.g., "regular_play", "corner_kick", "counter_attack")
-- **own_goal_player_appearance_id**: Own goal indicator
-- **block_player_appearance_id**: Blocking player
-- **minute**: Minute of the shot
-- **possession**: Possession ID
-- **stage**: Field position
-- **under_pressure**: Boolean indicating pressure
+| File                                             | Role                                                       | Approx. rows |
+| ------------------------------------------------ | ---------------------------------------------------------- | ------------ |
+| `players_quarters_final.csv`                     | Checkpoint-level modeling table with target `scored_after` | 3,486        |
+| `player_appearance_pass.csv`                     | Pass events, accuracy, addressee, stage, period/minute     | 29,795       |
+| `player_appearance_run.csv`                      | High-speed run/sprint events, speed, distance, run type    | 35,133       |
+| `player_appearance_shot_limited.csv`             | Shot context without full outcome data                     | 780          |
+| `player_appearance_behaviour_under_pressure.csv` | Pressed-player decisions and pressing-player IDs           | 12,185       |
 
-### 4. player_appearance_behaviour_under_pressure.csv
-Contains player behavior when pressed:
-- **id**: Unique event identifier
-- **period**: Game period
-- **player_appearance_id**: Player under pressure
-- **addressee_player_appearance_id**: Pass recipient
-- **accurate**: Pass accuracy
-- **pressing_player_appearance_id**: Pressing player
-- **press_induced_outcome**: Outcome (e.g., "turnover", "forward_pass", "backward_pass")
-- **pass_angle**: Angle of the pass
-- **minute**: Event minute
-- **stage**: Field position
 
-### 5. players_quarters_final.csv
-Main player statistics file with rolling and cumulative metrics:
-- **player_appearance_id**: Unique player appearance ID
-- **player_id**: Player identifier
-- **fixture_id**: Match identifier
-- **date**: Match date
-- **checkpoint**: Time checkpoint (e.g., "H1_15" = half 1, minute 15)
-- **checkpoint_period**: Period of checkpoint
-- **checkpoint_min**: Minute of checkpoint
-- **position**: Player position (G=Goalkeeper, D=Defender, M=Midfielder, F=Forward)
-- **is_home**: Boolean for home team
-- **formation**: Team formation
-- **minute_in**, **minute_out**: Substitution times
-- **subbed**: Boolean if substituted
-- **jersey_number**: Player number
-- **last15_***: Rolling 15-minute statistics (sprints, hsr, distance, speed, shots)
-- **cumul_***: Cumulative statistics from start of match
-- **scored_after**: Target variable (likely indicates if team scored after this checkpoint)
+CSV conventions: comma-separated, booleans are usually uppercase `TRUE`/`FALSE`, missing values may be literal `NULL`, dates are `YYYY-MM-DD`, and IDs are integers.
 
-## Key Relationships
+Important checkpoint columns:
 
-- **player_appearance_id** is the primary key linking all datasets
-- Each player appearance represents a single player in a single match
-- Events (runs, passes, shots) are linked to player appearances
-- The quarters file provides temporal snapshots with rolling and cumulative statistics
+- `checkpoint`, `checkpoint_period`, `checkpoint_min`: period-relative checkpoint time.
+- `minute_in`, `minute_out`, `subbed`: substitution context. Treat `minute_out` and `subbed` as future information for modeling unless a specific analysis intentionally audits substitutions.
+- `last15_*` and `cumul_*`: supplied rolling and cumulative physical/shot statistics.
+- `scored_after`: target.
 
-## Data Characteristics
+## Modeling Workflow
 
-- **Time-series nature**: Data includes temporal checkpoints throughout matches
-- **Hierarchical structure**: Player → Player Appearance → Events
-- **Field positions**: Data includes spatial information (top, middle, bottom)
-- **Performance metrics**: Physical (speed, distance), technical (passes, shots), and contextual (pressure)
+Prefer `src/temporal_features.py` and `run_experiment.py` for current report-grade modeling. `FeatureFactory` and `main.py` are useful historical/simple baselines, but they are less careful than the fold-safe workflow.
 
-## Development Guidelines
+Current fold-safe flow:
 
-### Python Environment
-- Project uses Python with standard .gitignore for Python projects
-- Virtual environments (.venv, venv) are gitignored
-- Jupyter notebooks are likely used for analysis (.ipynb_checkpoints ignored)
+1. Load `players_quarters_final.csv` plus pass/run/shot/pressure event logs.
+2. Split with fixture-grouped, stratified CV (`StratifiedGroupKFold` or `FixtureGroupKFold`) so one fixture never appears in both train and validation.
+3. Fit `TemporalFeatureBuilder` on the training checkpoints only.
+4. Transform train and validation checkpoints separately using the same fitted builder.
+5. Encode categoricals and impute numerics using training-fold data only.
+6. Evaluate with ROC-AUC, PR-AUC, balanced accuracy, F1, Brier score, and log loss.
 
-### Data Processing Conventions
-- CSV files use comma separation
-- NULL values represented as "NULL" string or actual NULL
-- Boolean values: TRUE/FALSE (uppercase)
-- Dates in YYYY-MM-DD format
-- IDs are integers
+`run_experiment.py` builds ablations for:
 
-### Analysis Focus Areas
-Based on the data structure, analysis should likely focus on:
-1. **Player performance prediction** using physical and technical metrics
-2. **Time-series analysis** of player statistics throughout matches
-3. **Pressure situations** and their impact on player decisions
-4. **Spatial analysis** using field position data
-5. **Scoring prediction** using the scored_after target variable
+- `base_checkpoint`
+- `sprints_shots`
+- `base_plus_passing`
+- `base_plus_pressure`
+- `recent_only`
+- `cumulative_only`
+- `external_context`
+- `all_features`
 
-## Notes
-- Match data appears to be from 2025 season (based on dates in sample data)
-- Data includes both raw events and aggregated statistics
-- Physical metrics include high-speed running (HSR) and sprint data
-- Pressure context is captured in multiple dimensions
+It then benchmarks logistic regression, ExtraTrees, RandomForest, XGBoost, CatBoost, LightGBM, stacking, and optional AutoGluon when installed.
+
+## Leakage And Temporal Integrity Rules
+
+Leakage prevention is the most important project constraint.
+
+- Always compare events to checkpoints using absolute match time, not only `minute`, because minutes restart by period. Period offsets are `half_1=0`, `half_2=45`, `extra_time_1=90`, `extra_time_2=105`.
+- Event-derived features must satisfy `minute_in <= event_abs_min <= checkpoint_abs_min`.
+- Do not use future substitution fields as features. `src/temporal_features.py` excludes `minute_out` and `subbed` in `modeling_columns()`.
+- Do not use shot outcome/result/goal columns as predictors. `src/data_ingestion.py` drops obvious shot leakage columns, and `LeakageValidator` rejects suspicious outcome-like feature names.
+- Fit learned reference quantities inside each training fold only: xT zone values, pressure turnover baselines, position baselines, imputers, encoders, scalers, thresholds, and meta-learners.
+- Group all CV by `fixture_id`; never random-split checkpoint rows from the same match across folds.
+- Run relevant tests after touching temporal logic, especially `tests/test_temporal_features.py`, `tests/test_temporal_integrity.py`, and `tests/test_cross_validator.py`.
+
+## Feature Engineering Notes
+
+`TemporalFeatureBuilder` creates the current main modeling table. It normalizes checkpoints, derives absolute time/context columns, aggregates event blocks over `last5`, `last15`, and cumulative windows, and provides research-question-oriented feature sets.
+
+Main feature families:
+
+- Checkpoint context: absolute checkpoint minute, half/extra-time flags, late-game flag, home/away, position, formation, minutes played.
+- Supplied physical and shooting state: `last15_*`, `cumul_*`, per-90 rates, recent-vs-cumulative ratios, intensity surge indicators.
+- Passing: counts, accuracy, receiver diversity, field-stage shares, xT-like stage values.
+- Running: event counts, distance, speed, HSR/sprint counts, stage shares.
+- Shots: shot context counts, pressure/share features, stage/body/technique/play-pattern signals.
+- Pressure: retention, turnovers, forward escape, pass angle summaries, stage shares.
+- Pressing applied: features from appearances listed as `pressing_player_appearance_id`.
+
+## Current Results And Report Artifacts
+
+Generated reporting artifacts are in `reports/`:
+
+- `reports/wec2026_modeling_report.tex`
+- `reports/wec2026_modeling_report.pdf`
+- `reports/figures/model_metrics.csv`
+- `reports/figures/model_feature_importance.csv`
+- `reports/figures/feature_correlations.csv`
+- `reports/figures/eda_plot_summary.json`
+- PDF figures for target rates, event-stage quality, model comparison, feature correlations, and feature importance.
+
+Recent figure-summary results show the task is noisy and imbalanced. The best recorded PR-AUC in `reports/figures/model_metrics.csv` is XGBoost at about 0.124, while RandomForest has the strongest ROC-AUC at about 0.683. Useful signals include attacker/defender position, pass stage shares, pressure quality/retention, recent HSR/distance ratios, and checkpoint timing.
+
+## Development Conventions
+
+- Keep changes scoped and preserve the leakage guardrails above.
+- Prefer pandas-compatible implementations unless GPU acceleration is isolated and optional.
+- cuDF/RAPIDS support is optional; code should fall back cleanly to pandas/CPU.
+- Configuration belongs in `config.yaml` when it changes data paths, CV, feature settings, model settings, or performance targets.
+- Tests use plain `pytest`; `pyproject.toml` configures coverage by default for `pytest`, while `make test` runs `pytest tests/ -v`.
+- Ruff line length is 100 and target Python is 3.12.
+- Use deterministic `random_state=42` unless there is a clear reason to expose a seed.
+- Avoid committing generated caches, virtual environments, model binaries, or large transient outputs unless explicitly requested.
+
+## When Adding Or Changing Code
+
+Before modeling changes:
+
+1. Identify whether the code path is the current fold-safe path (`TemporalFeatureBuilder`/`run_experiment.py`) or the older baseline path (`FeatureFactory`/`main.py`).
+2. Confirm the feature is knowable at checkpoint time.
+3. Add or update a focused test if the change affects time conversion, event filtering, feature inclusion/exclusion, or grouped CV.
+4. Run the smallest relevant test first, then broaden to `make test` when practical.
+
+For report updates, regenerate the source CSV/JSON/PDF artifacts with `scripts/create_eda_plots.py` or `run_experiment.py` rather than hand-editing derived tables.
