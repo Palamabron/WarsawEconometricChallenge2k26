@@ -206,7 +206,7 @@ Most stable patterns across correlation and model-importance exports point to:
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/oof_precision_recall.pdf}
-\caption{Precision-recall curves for top OOF prediction columns.}
+\caption{Precision-recall curves for OOF model probabilities with an external legend to keep traces unobstructed.}
 \label{fig:oof_pr}
 \end{figure}
 
@@ -234,8 +234,8 @@ lightgbm\_all\_features & 0.160 \\
 \end{tabular}
 \end{table}
 
-\paragraph{Important scope note.}
-The explainability run used \texttt{scan} mode (fast), so expensive SHAP/permutation artifacts are placeholders in this package; practical interpretation here is based on OOF metrics, correlation exports, model importance CSV, PR curves, and stacking-weight diagnostics.
+\paragraph{Scope note.}
+This package focuses on fast, reproducible diagnostics from OOF predictions (PR curves and meta-weights). Full SHAP/permutation analysis is intentionally excluded from the fast scan path and should be run in \texttt{full} mode when deeper attribution is needed.
 
 \section{Discussion}
 The pipeline consistently extracts signal above base rate, but absolute PR-AUC remains low, reflecting rare-event difficulty and noisy football outcomes. In this run, Random Forest gives the strongest minority ranking (PR-AUC), while stacking improves ROC-AUC and Brier calibration relative to individual tree models. The model family differences and meta-weights indicate complementary behavior between base learners rather than one universally dominant predictor.

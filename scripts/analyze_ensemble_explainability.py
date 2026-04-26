@@ -392,7 +392,7 @@ def plot_oof_precision_recall(
 ) -> None:
     if not predictions:
         return
-    _fig, ax = plt.subplots(figsize=(8, 5))
+    _fig, ax = plt.subplots(figsize=(9.2, 5.4))
     base = float(np.mean(y_true)) if len(y_true) else 0.0
     ax.axhline(base, color="gray", linestyle=":", linewidth=1, label=f"baseline ({base:.4f})")
     for name, proba in predictions.items():
@@ -407,11 +407,17 @@ def plot_oof_precision_recall(
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.set_title("OOF precision-recall curves")
-    ax.legend(frameon=False, fontsize=7, loc="lower left")
+    ax.legend(
+        frameon=False,
+        fontsize=7,
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        borderaxespad=0,
+    )
     ax.grid(alpha=0.25)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.02)
-    plt.tight_layout()
+    plt.tight_layout(rect=(0.0, 0.0, 0.8, 1.0))
     plt.savefig(path, bbox_inches="tight")
     plt.close()
 
@@ -523,17 +529,6 @@ def main() -> None:
             plt.tight_layout()
             plt.savefig(args.analysis_dir / "stacked_meta_weights.pdf", bbox_inches="tight")
             plt.close()
-
-        # Write tiny placeholder artifacts so downstream tooling can rely on the filenames.
-        pd.DataFrame(
-            columns=["model", "feature", "importance_mean", "importance_std"]
-        ).to_csv(args.analysis_dir / "native_feature_importance_by_model.csv", index=False)
-        pd.DataFrame(
-            columns=["model", "feature", "pr_auc_drop_mean", "pr_auc_drop_std"]
-        ).to_csv(args.analysis_dir / "permutation_importance_by_model.csv", index=False)
-        pd.DataFrame(columns=["model", "feature", "mean_abs_shap"]).to_csv(
-            args.analysis_dir / "shap_importance_by_model.csv", index=False
-        )
 
         logger.info("Explainability scan artifacts written to %s", args.analysis_dir)
         return
