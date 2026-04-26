@@ -4,6 +4,7 @@ Cross-Validation Strategy with Group-based splitting
 Implements fixture-level GroupKFold to prevent match-level data leakage.
 """
 
+import logging
 from collections.abc import Iterator
 
 import numpy as np
@@ -11,6 +12,8 @@ import pandas as pd
 from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
 
 from src.config import get_config
+
+logger = logging.getLogger(__name__)
 
 
 class FixtureGroupKFold:
@@ -73,9 +76,11 @@ class FixtureGroupKFold:
         Yields:
             Tuple of (train_indices, validation_indices)
         """
-        print(f"\nGenerating {self.n_splits}-fold cross-validation splits...")
-        print("Grouping by: fixture_id")
-        print(f"Stratified: {self.stratify}")
+        logger.info(
+            "Generating %s-fold cross-validation splits: group_by=fixture_id stratified=%s",
+            self.n_splits,
+            self.stratify,
+        )
 
         # Convert to numpy arrays if needed
         if isinstance(y, pd.Series):
@@ -105,12 +110,20 @@ class FixtureGroupKFold:
             train_pct = (train_pos / len(train_idx)) * 100
             val_pct = (val_pos / len(val_idx)) * 100
 
-            print(f"\nFold {fold_num}:")
-            print(
-                f"  Train: {len(train_idx):4d} samples, {train_pos:3d} positive ({train_pct:.2f}%)"
+            logger.info(
+                "Fold %s: train_samples=%s train_positive=%s train_positive_rate=%.2f%% "
+                "val_samples=%s val_positive=%s val_positive_rate=%.2f%% "
+                "train_matches=%s val_matches=%s",
+                fold_num,
+                len(train_idx),
+                train_pos,
+                train_pct,
+                len(val_idx),
+                val_pos,
+                val_pct,
+                len(train_groups),
+                len(val_groups),
             )
-            print(f"  Val:   {len(val_idx):4d} samples, {val_pos:3d} positive ({val_pct:.2f}%)")
-            print(f"  Train matches: {len(train_groups)}, Val matches: {len(val_groups)}")
 
             yield train_idx, val_idx
             fold_num += 1

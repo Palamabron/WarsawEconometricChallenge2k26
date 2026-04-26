@@ -36,6 +36,43 @@ ID_COLS = {
     "checkpoint",
     "scored_after",
 }
+NON_MODEL_COLS = {
+    "jersey_number",
+    # These are only known after the appearance ends, so they leak future substitution information.
+    "minute_out",
+    "subbed",
+}
+REDUNDANT_MODEL_FEATURES = frozenset(
+    {
+        # Position is represented by explicit role flags, which avoids one-hot duplicates.
+        "position",
+        # Event-log run aggregates duplicate the supplied checkpoint physical summaries.
+        "last15_sprint_event_count",
+        "last15_hsr_event_count",
+        "last15_run_distance",
+        "last15_run_mean_speed",
+        "last15_run_max_speed",
+        "cumul_sprint_event_count",
+        "cumul_hsr_event_count",
+        "cumul_run_distance",
+        "cumul_run_mean_speed",
+        "cumul_run_max_speed",
+        # Event-log shot counts/ratios duplicate supplied checkpoint shot summaries.
+        "last15_shot_event_count",
+        "cumul_shot_event_count",
+        "cumul_shot_under_pressure_rate",
+        "cumul_shot_top_share",
+        # Expected turnovers were almost a scaled pressure count; quality keeps the adjustment.
+        "last5_pressure_expected_turnovers",
+        "last15_pressure_expected_turnovers",
+        "cumul_pressure_expected_turnovers",
+    }
+)
+
+
+def remove_redundant_model_features(columns: Iterable[str]) -> list[str]:
+    """Drop deterministic or near-deterministic feature aliases before modeling."""
+    return [c for c in columns if c not in REDUNDANT_MODEL_FEATURES]
 
 
 def add_absolute_time(
@@ -128,6 +165,21 @@ def _empty_features(checkpoints: pd.DataFrame, columns: Iterable[str]) -> pd.Dat
     return out
 
 
+def _window_duration(checkpoints: pd.DataFrame, window: int | None) -> pd.Series:
+    """Return the observable minutes for a checkpoint/window pair."""
+    played = pd.to_numeric(checkpoints["minutes_played_at_checkpoint"], errors="coerce").fillna(1)
+    if window is None:
+        return played.clip(lower=1)
+    return played.clip(lower=1, upper=window)
+
+
+def _safe_mean(series: pd.Series, default: float = 0.0) -> float:
+    values = pd.to_numeric(series, errors="coerce")
+    if values.dropna().empty:
+        return default
+    return float(values.mean())
+
+
 @dataclass
 class TemporalFeatureBuilder:
     """Fold-safe feature builder for checkpoint-level goal prediction."""
@@ -135,6 +187,8 @@ class TemporalFeatureBuilder:
     zones: list[str] = field(default_factory=lambda: ["bottom", "middle", "top"])
     zone_xt_: dict[str, float] = field(default_factory=dict)
     pressure_turnover_rate_: dict[str, float] = field(default_factory=dict)
+    pressure_global_turnover_rate_: float = 0.0
+    proportion_priors_: dict[str, float] = field(default_factory=dict)
     position_baselines_: pd.DataFrame | None = None
     fitted_: bool = False
 
@@ -155,6 +209,10 @@ class TemporalFeatureBuilder:
 
         self.zone_xt_ = self._fit_zone_xt(pass_train, shot_train)
         self.pressure_turnover_rate_ = self._fit_pressure_turnover_rates(pressure_train)
+        self.pressure_global_turnover_rate_ = _safe_mean(pressure_train["is_turnover"], 0.0)
+        self.proportion_priors_ = self._fit_proportion_priors(
+            pass_train, shot_train, pressure_train
+        )
         self.position_baselines_ = self._fit_position_baselines(checkpoints)
         self.fitted_ = True
         return self
@@ -187,16 +245,16 @@ class TemporalFeatureBuilder:
             features = features.merge(block, on=["player_appearance_id", "checkpoint"], how="left")
 
         numeric_cols = features.select_dtypes(include=[np.number]).columns
-        features[numeric_cols] = features[numeric_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
+        features[numeric_cols] = features[numeric_cols].replace([np.inf, -np.inf], np.nan)
         features = self._add_derived_features(features)
         numeric_cols = features.select_dtypes(include=[np.number]).columns
-        features[numeric_cols] = features[numeric_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
+        features[numeric_cols] = features[numeric_cols].replace([np.inf, -np.inf], np.nan)
         return features
 
     def get_feature_sets(self, columns: Iterable[str]) -> dict[str, list[str]]:
         """Return research-question-oriented feature families."""
-        cols = list(columns)
-        id_like = ID_COLS | {"checkpoint_period"}
+        cols = remove_redundant_model_features(columns)
+        id_like = ID_COLS | NON_MODEL_COLS | {"checkpoint_period"}
 
         def keep(predicate) -> list[str]:
             return [c for c in cols if c not in id_like and predicate(c)]
@@ -217,10 +275,8 @@ class TemporalFeatureBuilder:
                     "is_midfielder",
                     "is_defender",
                     "is_goalkeeper",
-                    "subbed",
                     "position",
                     "formation",
-                    "jersey_number",
                 }
             )
         )
@@ -245,9 +301,7 @@ class TemporalFeatureBuilder:
                     "is_late_game",
                     "position",
                     "formation",
-                    "subbed",
                     "minute_in",
-                    "minute_out",
                     "minutes_played_at_checkpoint",
                 }
             )
@@ -316,6 +370,8 @@ class TemporalFeatureBuilder:
             ["forward_pass", "backward_pass", "lateral_pass", "ball_carry"]
         )
         df["is_forward_escape"] = df["outcome"].isin(["forward_pass", "ball_carry"])
+        df["is_backward_escape"] = df["outcome"].eq("backward_pass")
+        df["is_lateral_escape"] = df["outcome"].eq("lateral_pass")
         df["pass_angle_abs"] = pd.to_numeric(df["pass_angle"], errors="coerce").abs()
         return df
 
@@ -356,7 +412,7 @@ class TemporalFeatureBuilder:
             values = shot_probs_arr * goal_probs + (1 - shot_probs_arr) * transition.dot(values)
             if np.max(np.abs(values - old)) < 1e-5:
                 break
-        return dict(zip(self.zones, values))
+        return dict(zip(self.zones, values, strict=True))
 
     def _fit_pressure_turnover_rates(self, pressure_df: pd.DataFrame) -> dict[str, float]:
         if pressure_df.empty:
@@ -365,6 +421,55 @@ class TemporalFeatureBuilder:
         return {
             zone: float(rates.get(zone, pressure_df["is_turnover"].mean())) for zone in self.zones
         }
+
+    def _fit_proportion_priors(
+        self,
+        pass_df: pd.DataFrame,
+        shot_df: pd.DataFrame,
+        pressure_df: pd.DataFrame,
+    ) -> dict[str, float]:
+        """Fit train-fold priors used to shrink noisy event-window proportions."""
+        priors: dict[str, float] = {}
+        if not pass_df.empty:
+            priors.update(
+                {
+                    "pass_accuracy": _safe_mean(pass_df["accurate_bool"], 0.0),
+                    "pass_missing_receiver_rate": _safe_mean(pass_df["addressee_missing"], 0.0),
+                    "pass_top_share": float((pass_df["stage"] == "top").mean()),
+                    "pass_middle_share": float((pass_df["stage"] == "middle").mean()),
+                    "pass_bottom_share": float((pass_df["stage"] == "bottom").mean()),
+                }
+            )
+        if not shot_df.empty:
+            priors.update(
+                {
+                    "shot_under_pressure_rate": _safe_mean(shot_df["under_pressure_bool"], 0.0),
+                    "shot_top_share": float((shot_df["stage"] == "top").mean()),
+                    "shot_head_rate": _safe_mean(shot_df["is_head"], 0.0),
+                    "shot_foot_rate": _safe_mean(shot_df["is_foot"], 0.0),
+                    "shot_blocked_rate": _safe_mean(shot_df["is_blocked"], 0.0),
+                }
+            )
+        if not pressure_df.empty:
+            priors.update(
+                {
+                    "pressure_retention": _safe_mean(
+                        pressure_df["is_positive_pressure_action"], 0.0
+                    ),
+                    "pressure_forward_escape_rate": _safe_mean(
+                        pressure_df["is_forward_escape"], 0.0
+                    ),
+                    "pressure_backward_escape_rate": _safe_mean(
+                        pressure_df["is_backward_escape"], 0.0
+                    ),
+                    "pressure_lateral_escape_rate": _safe_mean(
+                        pressure_df["is_lateral_escape"], 0.0
+                    ),
+                    "pressure_turnover_rate": _safe_mean(pressure_df["is_turnover"], 0.0),
+                    "pressure_top_share": float((pressure_df["stage"] == "top").mean()),
+                }
+            )
+        return priors
 
     def _fit_position_baselines(self, checkpoints: pd.DataFrame) -> pd.DataFrame:
         cols = [
@@ -386,6 +491,7 @@ class TemporalFeatureBuilder:
             columns.extend(
                 [
                     f"{prefix}_pass_count",
+                    f"{prefix}_pass_has_events",
                     f"{prefix}_pass_accuracy",
                     f"{prefix}_pass_receiver_diversity",
                     f"{prefix}_pass_missing_receiver_rate",
@@ -413,6 +519,7 @@ class TemporalFeatureBuilder:
                 agg = grouped.agg(
                     **{
                         f"{prefix}_pass_count": ("id", "count"),
+                        f"{prefix}_pass_has_events": ("id", lambda x: int(len(x) > 0)),
                         f"{prefix}_pass_accuracy": ("accurate_bool", "mean"),
                         f"{prefix}_pass_receiver_diversity": (
                             "addressee_player_appearance_id",
@@ -437,6 +544,7 @@ class TemporalFeatureBuilder:
             columns.extend(
                 [
                     f"{prefix}_run_event_count",
+                    f"{prefix}_run_has_events",
                     f"{prefix}_run_distance",
                     f"{prefix}_run_max_speed",
                     f"{prefix}_run_mean_speed",
@@ -463,6 +571,7 @@ class TemporalFeatureBuilder:
                 agg = grouped.agg(
                     **{
                         f"{prefix}_run_event_count": ("id", "count"),
+                        f"{prefix}_run_has_events": ("id", lambda x: int(len(x) > 0)),
                         f"{prefix}_run_distance": ("distance", "sum"),
                         f"{prefix}_run_max_speed": ("max_speed", "max"),
                         f"{prefix}_run_mean_speed": ("max_speed", "mean"),
@@ -483,6 +592,7 @@ class TemporalFeatureBuilder:
             columns.extend(
                 [
                     f"{prefix}_shot_event_count",
+                    f"{prefix}_shot_has_events",
                     f"{prefix}_shot_under_pressure_rate",
                     f"{prefix}_shot_top_share",
                     f"{prefix}_shot_counter_count",
@@ -509,6 +619,7 @@ class TemporalFeatureBuilder:
                 agg = grouped.agg(
                     **{
                         f"{prefix}_shot_event_count": ("id", "count"),
+                        f"{prefix}_shot_has_events": ("id", lambda x: int(len(x) > 0)),
                         f"{prefix}_shot_under_pressure_rate": ("under_pressure_bool", "mean"),
                         f"{prefix}_shot_top_share": ("stage", lambda x: (x == "top").mean()),
                         f"{prefix}_shot_counter_count": ("is_counter", "sum"),
@@ -529,8 +640,11 @@ class TemporalFeatureBuilder:
             columns.extend(
                 [
                     f"{prefix}_pressure_count",
+                    f"{prefix}_pressure_has_events",
                     f"{prefix}_pressure_retention",
                     f"{prefix}_pressure_forward_escape_rate",
+                    f"{prefix}_pressure_backward_escape_rate",
+                    f"{prefix}_pressure_lateral_escape_rate",
                     f"{prefix}_pressure_turnover_rate",
                     f"{prefix}_pressure_expected_turnovers",
                     f"{prefix}_pressure_quality",
@@ -546,7 +660,7 @@ class TemporalFeatureBuilder:
         pressure["expected_turnover"] = (
             pressure["stage"]
             .map(self.pressure_turnover_rate_)
-            .fillna(pressure["is_turnover"].mean())
+            .fillna(self.pressure_global_turnover_rate_)
         )
         merged = _merge_events(checkpoints, pressure)
         outputs = checkpoints[["player_appearance_id", "checkpoint"]].copy()
@@ -561,8 +675,17 @@ class TemporalFeatureBuilder:
                 agg = grouped.agg(
                     **{
                         f"{prefix}_pressure_count": ("id", "count"),
+                        f"{prefix}_pressure_has_events": ("id", lambda x: int(len(x) > 0)),
                         f"{prefix}_pressure_retention": ("is_positive_pressure_action", "mean"),
                         f"{prefix}_pressure_forward_escape_rate": ("is_forward_escape", "mean"),
+                        f"{prefix}_pressure_backward_escape_rate": (
+                            "is_backward_escape",
+                            "mean",
+                        ),
+                        f"{prefix}_pressure_lateral_escape_rate": (
+                            "is_lateral_escape",
+                            "mean",
+                        ),
                         f"{prefix}_pressure_turnover_rate": ("is_turnover", "mean"),
                         f"{prefix}_pressure_expected_turnovers": ("expected_turnover", "sum"),
                         f"{prefix}_pressure_angle_mean_abs": ("pass_angle_abs", "mean"),
@@ -633,6 +756,73 @@ class TemporalFeatureBuilder:
     def _add_derived_features(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
 
+        def smooth_rate(col: str, count_col: str, prior_key: str, strength: float = 8.0) -> None:
+            prior = self.proportion_priors_.get(prior_key, 0.0)
+            counts = pd.to_numeric(out[count_col], errors="coerce").fillna(0).clip(lower=0)
+            values = pd.to_numeric(out[col], errors="coerce").fillna(prior)
+            out[f"{col}_smoothed"] = ((values * counts) + (prior * strength)) / (counts + strength)
+
+        for prefix, window in WINDOWS.items():
+            duration = _window_duration(out, window)
+            for family, count_col in {
+                "pass": f"{prefix}_pass_count",
+                "run": f"{prefix}_run_event_count",
+                "shot": f"{prefix}_shot_event_count",
+                "pressure": f"{prefix}_pressure_count",
+            }.items():
+                out[f"{prefix}_{family}_events_per_minute"] = (
+                    _safe_div(out[count_col], duration).fillna(0).values
+                )
+
+            smooth_specs = {
+                f"{prefix}_pass_accuracy": (f"{prefix}_pass_count", "pass_accuracy"),
+                f"{prefix}_pass_missing_receiver_rate": (
+                    f"{prefix}_pass_count",
+                    "pass_missing_receiver_rate",
+                ),
+                f"{prefix}_pass_top_share": (f"{prefix}_pass_count", "pass_top_share"),
+                f"{prefix}_pass_middle_share": (f"{prefix}_pass_count", "pass_middle_share"),
+                f"{prefix}_pass_bottom_share": (f"{prefix}_pass_count", "pass_bottom_share"),
+                f"{prefix}_shot_under_pressure_rate": (
+                    f"{prefix}_shot_event_count",
+                    "shot_under_pressure_rate",
+                ),
+                f"{prefix}_shot_top_share": (f"{prefix}_shot_event_count", "shot_top_share"),
+                f"{prefix}_shot_head_rate": (f"{prefix}_shot_event_count", "shot_head_rate"),
+                f"{prefix}_shot_foot_rate": (f"{prefix}_shot_event_count", "shot_foot_rate"),
+                f"{prefix}_shot_blocked_rate": (
+                    f"{prefix}_shot_event_count",
+                    "shot_blocked_rate",
+                ),
+                f"{prefix}_pressure_retention": (
+                    f"{prefix}_pressure_count",
+                    "pressure_retention",
+                ),
+                f"{prefix}_pressure_forward_escape_rate": (
+                    f"{prefix}_pressure_count",
+                    "pressure_forward_escape_rate",
+                ),
+                f"{prefix}_pressure_backward_escape_rate": (
+                    f"{prefix}_pressure_count",
+                    "pressure_backward_escape_rate",
+                ),
+                f"{prefix}_pressure_lateral_escape_rate": (
+                    f"{prefix}_pressure_count",
+                    "pressure_lateral_escape_rate",
+                ),
+                f"{prefix}_pressure_turnover_rate": (
+                    f"{prefix}_pressure_count",
+                    "pressure_turnover_rate",
+                ),
+                f"{prefix}_pressure_top_share": (
+                    f"{prefix}_pressure_count",
+                    "pressure_top_share",
+                ),
+            }
+            for col, (count_col, prior_key) in smooth_specs.items():
+                if col in out.columns and count_col in out.columns:
+                    smooth_rate(col, count_col, prior_key)
+
         out["shot_accuracy_cumul"] = (
             _safe_div(out["cumul_shots_on_target"], out["cumul_shots"]).fillna(0).values
         )
@@ -658,6 +848,12 @@ class TemporalFeatureBuilder:
         out["recent_xt_ratio"] = (
             _safe_div(out["last15_xt_added"], out["cumul_xt_added"].abs() + 1).fillna(0).values
         )
+        out["last15_shot_to_pass_ratio"] = (
+            _safe_div(out["last15_shots"], out["last15_pass_count"]).fillna(0).clip(0, 10).values
+        )
+        out["cumul_shot_to_pass_ratio"] = (
+            _safe_div(out["cumul_shots"], out["cumul_pass_count"]).fillna(0).clip(0, 10).values
+        )
         out["recent_pressure_quality_delta"] = out["last15_pressure_quality"] - (
             out["cumul_pressure_quality"] - out["last15_pressure_quality"]
         )
@@ -681,6 +877,24 @@ class TemporalFeatureBuilder:
         out["speed_preservation"] = (
             _safe_div(out["last15_peak_speed"], out["cumul_peak_speed"]).fillna(1).clip(0, 2).values
         )
+        out["last15_run_distance_per_event"] = (
+            _safe_div(out["last15_run_distance"], out["last15_run_event_count"]).fillna(0).values
+        )
+        out["cumul_run_distance_per_event"] = (
+            _safe_div(out["cumul_run_distance"], out["cumul_run_event_count"]).fillna(0).values
+        )
+        for prefix in WINDOWS:
+            passive_pressure = (
+                out[f"{prefix}_pressure_backward_escape_rate"]
+                + out[f"{prefix}_pressure_lateral_escape_rate"]
+                + out[f"{prefix}_pressure_turnover_rate"]
+            )
+            out[f"{prefix}_pressure_verticality_ratio"] = (
+                _safe_div(out[f"{prefix}_pressure_forward_escape_rate"], passive_pressure)
+                .fillna(0)
+                .clip(0, 10)
+                .values
+            )
         out["has_intensity_surge"] = (out["workload_ratio_hsr"] > 1.2).astype(int)
         out["is_fatigued"] = (out["workload_ratio_hsr"] < 0.8).astype(int)
 
@@ -708,6 +922,17 @@ class TemporalFeatureBuilder:
         out["surge_x_shots"] = out["has_intensity_surge"] * out["cumul_shots"]
         out["fatigue_x_shots"] = out["is_fatigued"] * out["cumul_shots"]
         out["pressure_x_xt"] = out["cumul_pressure_quality"] * out["cumul_xt_added"]
+        out["attacker_x_last15_pass_top_share"] = (
+            out["is_attacker"] * out["last15_pass_top_share_smoothed"]
+        )
+        out["attacker_x_last15_xt"] = out["is_attacker"] * out["last15_xt_added"]
+        out["late_x_shot_pressure"] = (
+            out["is_late_game"] * out["last15_shot_under_pressure_rate_smoothed"]
+        )
+        out["late_x_recent_distance"] = out["is_late_game"] * out["recent_distance_ratio"]
+        out["minutes_x_recent_xt_ratio"] = (
+            out["minutes_played_at_checkpoint"] * out["recent_xt_ratio"]
+        )
         out["pass_xt_per_pass"] = (
             _safe_div(out["cumul_xt_added"], out["cumul_pass_count"]).fillna(0).values
         )
@@ -725,6 +950,10 @@ class TemporalFeatureBuilder:
 def modeling_columns(df: pd.DataFrame, feature_cols: Iterable[str] | None = None) -> list[str]:
     """Return usable feature columns, excluding IDs and target."""
     if feature_cols is not None:
-        return [c for c in feature_cols if c in df.columns and c not in ID_COLS and c != TARGET_COL]
-    excluded = ID_COLS | {"is_on_pitch"}
+        return [
+            c
+            for c in feature_cols
+            if c in df.columns and c not in ID_COLS and c not in NON_MODEL_COLS and c != TARGET_COL
+        ]
+    excluded = ID_COLS | NON_MODEL_COLS | {"is_on_pitch"}
     return [c for c in df.columns if c not in excluded and c != TARGET_COL]

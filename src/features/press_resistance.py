@@ -5,9 +5,12 @@ Analyzes player behavior under defensive pressure to quantify composure,
 decision-making quality, and ability to progress the ball under duress.
 """
 
+import logging
 from typing import Union
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 try:
     import cudf
@@ -69,7 +72,7 @@ def calculate_press_resistance_features(
     if baseline_turnover_rates is None:
         baseline_turnover_rates = _calculate_baseline_turnover_rates(pressure_pd, negative_outcomes)
 
-    print(f"Baseline turnover rates by zone: {baseline_turnover_rates}")
+    logger.info("Baseline turnover rates by zone: %s", baseline_turnover_rates)
 
     # Initialize feature columns
     checkpoint_pd["last15_press_retention"] = 0.0

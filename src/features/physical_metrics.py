@@ -209,11 +209,10 @@ def _calculate_run_diversity(run_df: pd.DataFrame, checkpoint_df: pd.DataFrame) 
     """
     diversity_results = []
 
-    for idx, row in checkpoint_df.iterrows():
+    for _, row in checkpoint_df.iterrows():
         player_id = row["player_appearance_id"]
         checkpoint_min = row["checkpoint_min"]
         checkpoint_period = row["checkpoint_period"]
-        minute_in = row["minute_in"]
 
         # Get runs for this player in rolling 15-min window
         player_runs = run_df[

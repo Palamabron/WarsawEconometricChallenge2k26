@@ -2,6 +2,8 @@
 Tests for Expected Threat (xT) feature engineering.
 """
 
+from typing import ClassVar
+
 import numpy as np
 import pandas as pd
 
@@ -11,11 +13,8 @@ from src.features.expected_threat import aggregate_xt_features
 class PrecomputedThreatCalculator:
     """Test double for aggregation with already prepared threat values."""
 
-    @staticmethod
-    def calculate_threat_added(pass_df):
-        df = pass_df.copy()
-        df["threat_added"] = df["xt_added"]
-        return df
+    zones: ClassVar[list[str]] = ["bottom", "middle", "top"]
+    zone_threat_values: ClassVar[np.ndarray] = np.array([0.0, 0.1, 0.3])
 
 
 class TestAggregateXTFeatures:
@@ -34,15 +33,21 @@ class TestAggregateXTFeatures:
 
         pass_data = pd.DataFrame(
             {
+                "id": [1, 2, 3],
                 "player_appearance_id": [1, 1, 1],
                 "period": ["half_1", "half_1", "half_1"],
                 "minute": [5, 12, 25],
-                "xt_added": [0.1, 0.2, -0.05],
+                "stage": ["middle", "top", "bottom"],
             }
         )
 
-        result = aggregate_xt_features(pass_data, checkpoint_data, PrecomputedThreatCalculator())
+        result = aggregate_xt_features(
+            pass_data,
+            checkpoint_data,
+            PrecomputedThreatCalculator(),  # type: ignore[arg-type]
+        )
 
-        # Should include passes at minute 5, 12 (not 25)
-        assert result["cumul_xt_count"].iloc[0] == 2
-        assert np.isclose(result["cumul_xt_added"].iloc[0], 0.3)
+        # The transition 5->12 is valid. The pass at 25 must not become the
+        # destination for minute 12 because it is after the checkpoint.
+        assert result["cumul_xt_count"].iloc[0] == 1
+        assert np.isclose(result["cumul_xt_added"].iloc[0], 0.2)

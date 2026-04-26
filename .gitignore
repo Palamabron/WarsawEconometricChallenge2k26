@@ -58,6 +58,7 @@ Thumbs.db
 # Project specific
 outputs/
 graphify-out/
+.cache/
 *.log
 *.csv~
 .pytest_cache/

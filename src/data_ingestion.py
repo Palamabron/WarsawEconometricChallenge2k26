@@ -1,11 +1,14 @@
 """Data ingestion module with GPU/CPU backend support"""
 
+import logging
 import warnings
 from typing import Union
 
 import pandas as pd
 
 from src.config import get_config
+
+logger = logging.getLogger(__name__)
 
 # Try importing cuDF for GPU acceleration
 try:
@@ -45,7 +48,7 @@ class DataIngestion:
         self.use_gpu = use_gpu
         self.backend = "cudf" if use_gpu else "pandas"
 
-        print(f"DataIngestion initialized with backend: {self.backend}")
+        logger.info("DataIngestion initialized: backend=%s", self.backend)
 
     def _get_dataframe_backend(self):
         """Get appropriate DataFrame library (cudf or pandas)"""
@@ -61,7 +64,7 @@ class DataIngestion:
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.checkpoint_file"))
 
-        print(f"Loading checkpoint data from {filepath}...")
+        logger.info("Loading checkpoint data from %s", filepath)
 
         # Optimized dtypes
         dtypes = {
@@ -115,7 +118,7 @@ class DataIngestion:
         # Validate data
         self._validate_checkpoint_data(df)
 
-        print(f"Loaded {len(df)} checkpoint observations")
+        logger.info("Loaded %s checkpoint observations", len(df))
         return df
 
     def load_pass_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
@@ -123,7 +126,7 @@ class DataIngestion:
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.pass_file"))
 
-        print(f"Loading pass data from {filepath}...")
+        logger.info("Loading pass data from %s", filepath)
 
         dtypes = {
             "id": "int32",
@@ -142,7 +145,7 @@ class DataIngestion:
             na_values=["NULL"],
         )
 
-        print(f"Loaded {len(df)} pass events")
+        logger.info("Loaded %s pass events", len(df))
         return df
 
     def load_run_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
@@ -150,7 +153,7 @@ class DataIngestion:
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.run_file"))
 
-        print(f"Loading run data from {filepath}...")
+        logger.info("Loading run data from %s", filepath)
 
         dtypes = {
             "id": "int32",
@@ -173,7 +176,7 @@ class DataIngestion:
             na_values=["NULL"],
         )
 
-        print(f"Loaded {len(df)} run events")
+        logger.info("Loaded %s run events", len(df))
         return df
 
     def load_shot_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
@@ -185,7 +188,7 @@ class DataIngestion:
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.shot_file"))
 
-        print(f"Loading shot data from {filepath}...")
+        logger.info("Loading shot data from %s", filepath)
 
         dtypes = {
             "id": "int32",
@@ -214,7 +217,7 @@ class DataIngestion:
             warnings.warn(f"Dropping potential leakage columns: {existing_leakage}")
             df = df.drop(columns=existing_leakage)
 
-        print(f"Loaded {len(df)} shot events")
+        logger.info("Loaded %s shot events", len(df))
         return df
 
     def load_pressure_data(self) -> Union[pd.DataFrame, "cudf.DataFrame"]:
@@ -222,7 +225,7 @@ class DataIngestion:
         df_lib = self._get_dataframe_backend()
         filepath = self.config.get_data_path(self.config.get("data.pressure_file"))
 
-        print(f"Loading pressure data from {filepath}...")
+        logger.info("Loading pressure data from %s", filepath)
 
         dtypes = {
             "id": "int32",
@@ -244,7 +247,7 @@ class DataIngestion:
             na_values=["NULL"],
         )
 
-        print(f"Loaded {len(df)} pressure events")
+        logger.info("Loaded %s pressure events", len(df))
         return df
 
     def load_all(
@@ -258,9 +261,7 @@ class DataIngestion:
         Returns:
             Tuple of (checkpoint_df, event_dfs_dict)
         """
-        print("=" * 60)
-        print("Loading all WEC2026 datasets...")
-        print("=" * 60)
+        logger.info("Loading all WEC2026 datasets")
 
         checkpoint_df = self.load_checkpoint_data()
 
@@ -271,10 +272,10 @@ class DataIngestion:
             "pressure": self.load_pressure_data(),
         }
 
-        print("=" * 60)
-        print("All datasets loaded successfully")
-        print(f"Total events: {sum(len(df) for df in event_dfs.values()):,}")
-        print("=" * 60)
+        logger.info(
+            "All datasets loaded successfully: total_events=%s",
+            sum(len(df) for df in event_dfs.values()),
+        )
 
         return checkpoint_df, event_dfs
 
@@ -314,9 +315,13 @@ class DataIngestion:
         target_dist = df_pd["scored_after"].value_counts()
         pos_pct = (target_dist.get(1, 0) / len(df_pd)) * 100
 
-        print("\nTarget distribution:")
-        print(f"  Negative class (0): {target_dist.get(0, 0):,} ({100 - pos_pct:.2f}%)")
-        print(f"  Positive class (1): {target_dist.get(1, 0):,} ({pos_pct:.2f}%)")
+        logger.info(
+            "Target distribution: negative=%s (%.2f%%) positive=%s (%.2f%%)",
+            target_dist.get(0, 0),
+            100 - pos_pct,
+            target_dist.get(1, 0),
+            pos_pct,
+        )
 
         if pos_pct < 5 or pos_pct > 7:
             warnings.warn(f"Target class imbalance ({pos_pct:.2f}%) differs from expected ~5.8%")

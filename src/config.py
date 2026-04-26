@@ -1,5 +1,6 @@
 """Configuration loader with environment detection"""
 
+import importlib.util
 import os
 from pathlib import Path
 from typing import Any
@@ -36,13 +37,9 @@ class Config:
         if cuda_visible == "" or cuda_visible == "-1":
             return False
 
-        # Try importing CUDA libraries
-        try:
-            import cudf
-
+        # Try detecting CUDA libraries without importing heavy GPU packages.
+        if importlib.util.find_spec("cudf") is not None:
             return True
-        except ImportError:
-            pass
 
         try:
             import torch

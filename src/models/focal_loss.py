@@ -6,7 +6,13 @@ FL(p_t) = -α_t * (1 - p_t)^γ * log(p_t)
 Gradients are computed w.r.t. the raw logit score s, as required by GBM frameworks.
 """
 
+from typing import Protocol
+
 import numpy as np
+
+
+class SupportsGetLabel(Protocol):
+    def get_label(self) -> np.ndarray: ...
 
 
 class FocalLoss:
@@ -123,7 +129,7 @@ def focal_loss_catboost(
 
 def focal_loss_xgboost(
     y_pred: np.ndarray,
-    dtrain: object,
+    dtrain: SupportsGetLabel,
     gamma: float = 2.0,
     alpha: float = 0.94,
 ) -> tuple[np.ndarray, np.ndarray]:

@@ -69,6 +69,25 @@ def test_player_on_pitch_validation():
     assert 3 not in filtered["player_appearance_id"].values
 
 
+def test_player_on_pitch_validation_uses_absolute_checkpoint_time():
+    """Second-half checkpoint minutes restart at 1, but substitutions are absolute."""
+
+    df = pd.DataFrame(
+        {
+            "player_appearance_id": [1, 2],
+            "checkpoint_period": ["half_2", "half_2"],
+            "checkpoint_min": [15, 15],
+            "minute_in": [46, 70],
+            "minute_out": [90, 90],
+            "scored_after": [0, 0],
+        }
+    )
+
+    filtered = LeakageValidator.validate_player_on_pitch(df)
+
+    assert filtered["player_appearance_id"].tolist() == [1]
+
+
 def test_cv_split_validation():
     """Test no match overlap between folds"""
 
@@ -152,6 +171,71 @@ def test_safe_temporal_merge_retains_checkpoints_without_events():
     # Event-side columns should be NaN for the unmatched checkpoint row
     assert pd.isna(unmatched_rows["minute"].iloc[0])
     assert pd.isna(unmatched_rows["value"].iloc[0])
+
+
+def test_safe_temporal_merge_retains_checkpoints_with_only_future_events():
+    checkpoint_df = pd.DataFrame(
+        {
+            "player_appearance_id": [1],
+            "checkpoint_min": [15],
+            "minute_in": [1],
+            "minute_out": [90],
+            "scored_after": [0],
+        }
+    )
+    event_df = pd.DataFrame(
+        {
+            "player_appearance_id": [1],
+            "minute": [20],
+            "value": [5],
+        }
+    )
+
+    merged = safe_temporal_merge(
+        checkpoint_df,
+        event_df,
+        on=["player_appearance_id"],
+        checkpoint_col="checkpoint_min",
+        event_time_col="minute",
+    )
+
+    assert len(merged) == 1
+    assert merged.loc[0, "checkpoint_min"] == 15
+    assert pd.isna(merged.loc[0, "minute"])
+    assert pd.isna(merged.loc[0, "value"])
+
+
+def test_safe_temporal_merge_uses_period_with_overlapping_minutes():
+    checkpoint_df = pd.DataFrame(
+        {
+            "player_appearance_id": [1],
+            "checkpoint_period": ["half_2"],
+            "checkpoint_min": [15],
+            "minute_in": [1],
+            "minute_out": [90],
+            "scored_after": [0],
+        }
+    )
+    event_df = pd.DataFrame(
+        {
+            "player_appearance_id": [1, 1, 1],
+            "period": ["half_1", "half_2", "half_2"],
+            "minute": [47, 10, 20],
+            "value": [1, 2, 3],
+        }
+    )
+
+    merged = safe_temporal_merge(
+        checkpoint_df,
+        event_df,
+        on=["player_appearance_id"],
+        checkpoint_col="checkpoint_min",
+        event_time_col="minute",
+        checkpoint_period_col="checkpoint_period",
+        event_period_col="period",
+    )
+
+    assert set(merged["value"].dropna()) == {1, 2}
 
 
 if __name__ == "__main__":

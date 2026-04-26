@@ -2,8 +2,6 @@
 Type aliases for cleaner type annotations across the codebase.
 """
 
-from typing import TypeAlias, Union
-
 import pandas as pd
 
 try:
@@ -15,7 +13,7 @@ except ImportError:
     cudf = None
 
 # DataFrame that could be pandas or cuDF
-DataFrame: TypeAlias = Union[pd.DataFrame, "cudf.DataFrame"]
+type DataFrame = pd.DataFrame | cudf.DataFrame
 
 # Series that could be pandas or cuDF
-Series: TypeAlias = Union[pd.Series, "cudf.Series"]
+type Series = pd.Series | cudf.Series

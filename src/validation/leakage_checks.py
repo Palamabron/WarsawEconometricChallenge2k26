@@ -4,11 +4,21 @@ Data Leakage Prevention and Validation
 Automated checks to ensure temporal integrity and prevent future data leakage.
 """
 
+import logging
 import warnings
 from typing import Union
 
 import numpy as np
 import pandas as pd
+
+PERIOD_OFFSETS = {
+    "half_1": 0,
+    "half_2": 45,
+    "extra_time_1": 90,
+    "extra_time_2": 105,
+}
+
+logger = logging.getLogger(__name__)
 
 try:
     import cudf
@@ -21,6 +31,16 @@ except ImportError:
 
 class LeakageValidator:
     """Automated data leakage detection and prevention"""
+
+    @staticmethod
+    def _with_absolute_time(
+        df: pd.DataFrame, period_col: str, minute_col: str, out_col: str
+    ) -> pd.DataFrame:
+        """Add absolute match time from period-relative minutes."""
+        out = df.copy()
+        offsets = out[period_col].astype(str).map(PERIOD_OFFSETS).fillna(0)
+        out[out_col] = offsets + pd.to_numeric(out[minute_col], errors="coerce")
+        return out
 
     @staticmethod
     def validate_temporal_boundaries(
@@ -47,7 +67,7 @@ class LeakageValidator:
         Raises:
             ValueError if leakage detected
         """
-        print("Running temporal integrity validation...")
+        logger.info("Running temporal integrity validation")
 
         # Convert to pandas if needed
         if CUDF_AVAILABLE and isinstance(checkpoint_df, cudf.DataFrame):
@@ -57,12 +77,24 @@ class LeakageValidator:
             checkpoint_pd = checkpoint_df
             engineered_pd = engineered_df
 
+        if "checkpoint_period" in checkpoint_pd.columns:
+            checkpoint_time = LeakageValidator._with_absolute_time(
+                checkpoint_pd, "checkpoint_period", "checkpoint_min", "_checkpoint_abs_min"
+            )
+            checkpoint_compare_col = "_checkpoint_abs_min"
+        else:
+            checkpoint_time = checkpoint_pd.copy()
+            checkpoint_time["_checkpoint_abs_min"] = pd.to_numeric(
+                checkpoint_time["checkpoint_min"], errors="coerce"
+            )
+            checkpoint_compare_col = "checkpoint_min"
+
         # Check 1: Substitution boundaries
-        print("  ✓ Checking substitution boundaries...")
-        invalid_subs = checkpoint_pd[
+        logger.info("Checking substitution boundaries")
+        invalid_subs = checkpoint_time[
             ~(
-                (checkpoint_pd["minute_in"] <= checkpoint_pd["checkpoint_min"])
-                & (checkpoint_pd["checkpoint_min"] <= checkpoint_pd["minute_out"])
+                (checkpoint_time["minute_in"] <= checkpoint_time[checkpoint_compare_col])
+                & (checkpoint_time[checkpoint_compare_col] <= checkpoint_time["minute_out"])
             )
         ]
 
@@ -74,7 +106,7 @@ class LeakageValidator:
 
         if event_dfs:
             # Check 2: Raw event schemas expose time boundaries for downstream feature builders
-            print("  ✓ Checking raw event time schemas...")
+            logger.info("Checking raw event time schemas")
             missing_time_cols = [
                 name
                 for name, event_df in event_dfs.items()
@@ -86,10 +118,10 @@ class LeakageValidator:
                     f"{missing_time_cols}. Expected both 'period' and 'minute'."
                 )
 
-            # Check 3: Event minutes <= max checkpoint minute for that player
-            print("  ✓ Checking event temporal boundaries...")
-            max_checkpoint_per_player = checkpoint_pd.groupby("player_appearance_id")[
-                "checkpoint_min"
+            # Check 3: Event period+minute <= max checkpoint period+minute for that player
+            logger.info("Checking event temporal boundaries with period+minute")
+            max_checkpoint_per_player = checkpoint_time.groupby("player_appearance_id")[
+                "_checkpoint_abs_min"
             ].max()
             for event_name, event_df in event_dfs.items():
                 if CUDF_AVAILABLE and isinstance(event_df, cudf.DataFrame):
@@ -98,22 +130,25 @@ class LeakageValidator:
                     event_pd = event_df
                 if "player_appearance_id" not in event_pd.columns:
                     continue
-                merged_check = event_pd.merge(
+                event_time = LeakageValidator._with_absolute_time(
+                    event_pd, "period", "minute", "_event_abs_min"
+                )
+                merged_check = event_time.merge(
                     max_checkpoint_per_player.rename("max_checkpoint"),
                     on="player_appearance_id",
                     how="inner",
                 )
                 future_events = merged_check[
-                    merged_check["minute"] > merged_check["max_checkpoint"]
+                    merged_check["_event_abs_min"] > merged_check["max_checkpoint"]
                 ]
                 if len(future_events) > 0:
                     warnings.warn(
                         f"Event dataset '{event_name}': found {len(future_events)} events "
-                        f"occurring after the player's last checkpoint minute."
+                        f"occurring after the player's last checkpoint period+minute."
                     )
 
         # Check 4: No forbidden columns
-        print("  ✓ Checking for forbidden columns...")
+        logger.info("Checking for forbidden columns")
         forbidden_keywords = ["outcome", "result", "goal_scored", "goal_conceded"]
         forbidden_cols = [
             col
@@ -126,7 +161,7 @@ class LeakageValidator:
             raise ValueError(f"Forbidden columns detected (potential leakage): {forbidden_cols}")
 
         # Check 4: Feature value ranges
-        print("  ✓ Checking feature value ranges...")
+        logger.info("Checking feature value ranges")
         numeric_cols = engineered_pd.select_dtypes(include=[np.number]).columns
 
         # Check for NaN
@@ -139,7 +174,7 @@ class LeakageValidator:
         if inf_cols:
             warnings.warn(f"Inf values found in {len(inf_cols)} columns")
 
-        print("  ✓ Temporal validation passed")
+        logger.info("Temporal validation passed")
         return True
 
     @staticmethod
@@ -196,7 +231,8 @@ class LeakageValidator:
         Filter out observations where player is not on pitch
 
         Args:
-            df: DataFrame with minute_in, minute_out, checkpoint_min
+            df: DataFrame with minute_in, minute_out, checkpoint_min, and
+                optionally checkpoint_period for period-aware filtering.
 
         Returns:
             Filtered DataFrame
@@ -208,16 +244,25 @@ class LeakageValidator:
 
         original_len = len(df_pd)
 
-        # Keep only valid observations
-        valid_mask = (df_pd["minute_in"] <= df_pd["checkpoint_min"]) & (
-            df_pd["checkpoint_min"] <= df_pd["minute_out"]
+        # Keep only valid observations. Checkpoint minutes are period-relative
+        # in WEC data, while substitutions are absolute match minutes.
+        if "checkpoint_period" in df_pd.columns:
+            checkpoint_time = LeakageValidator._with_absolute_time(
+                df_pd, "checkpoint_period", "checkpoint_min", "_checkpoint_abs_min"
+            )
+            checkpoint_compare = checkpoint_time["_checkpoint_abs_min"]
+        else:
+            checkpoint_compare = pd.to_numeric(df_pd["checkpoint_min"], errors="coerce")
+
+        valid_mask = (df_pd["minute_in"] <= checkpoint_compare) & (
+            checkpoint_compare <= df_pd["minute_out"]
         )
 
         df_filtered = df_pd[valid_mask].copy()
 
         removed = original_len - len(df_filtered)
         if removed > 0:
-            print(f"Removed {removed} observations where player not on pitch")
+            logger.info("Removed %s observations where player not on pitch", removed)
 
         if CUDF_AVAILABLE and isinstance(df, cudf.DataFrame):
             return cudf.from_pandas(df_filtered)
@@ -231,6 +276,8 @@ def safe_temporal_merge(
     on: list,
     checkpoint_col: str = "checkpoint_min",
     event_time_col: str = "minute",
+    checkpoint_period_col: str | None = None,
+    event_period_col: str | None = None,
 ) -> pd.DataFrame:
     """
     Safely merge event data to checkpoint data with temporal filtering
@@ -243,21 +290,54 @@ def safe_temporal_merge(
         on: Columns to join on (typically ['player_appearance_id'])
         checkpoint_col: Checkpoint time column in left_df
         event_time_col: Event time column in right_df
+        checkpoint_period_col: Optional period column in left_df. When provided
+            with event_period_col, filtering uses period+minute absolute time.
+        event_period_col: Optional period column in right_df.
 
     Returns:
         Merged DataFrame with temporal integrity
     """
-    # Merge
-    merged = left_df.merge(right_df, on=on, how="left", suffixes=("", "_event"))
+    left_marker = "__safe_temporal_merge_left_row_id"
+    while left_marker in left_df.columns or left_marker in right_df.columns:
+        left_marker = f"_{left_marker}"
 
-    # Filter to past events only while preserving unmatched left rows
+    left_with_marker = left_df.copy()
+    left_with_marker[left_marker] = np.arange(len(left_with_marker))
+
+    # Merge
+    merged = left_with_marker.merge(right_df, on=on, how="left", suffixes=("", "_event"))
+
+    # Filter to past events only while preserving unmatched left rows.
+    # Period-aware filtering is required because event minutes restart each period
+    # and stoppage time can create first-half minutes above 45.
     if event_time_col in merged.columns:
-        valid_mask = merged[event_time_col].isna() | (
-            merged[event_time_col] <= merged[checkpoint_col]
-        )
+        if checkpoint_period_col and event_period_col:
+            checkpoint_abs = merged[checkpoint_period_col].astype(str).map(PERIOD_OFFSETS).fillna(
+                0
+            ) + pd.to_numeric(merged[checkpoint_col], errors="coerce")
+            event_abs = merged[event_period_col].astype(str).map(PERIOD_OFFSETS).fillna(
+                0
+            ) + pd.to_numeric(merged[event_time_col], errors="coerce")
+            valid_mask = merged[event_time_col].isna() | (event_abs <= checkpoint_abs)
+        else:
+            valid_mask = merged[event_time_col].isna() | (
+                merged[event_time_col] <= merged[checkpoint_col]
+            )
         merged = merged[valid_mask]
 
-    return merged
+    missing_left_ids = left_with_marker.loc[
+        ~left_with_marker[left_marker].isin(merged[left_marker]), left_marker
+    ]
+    if not missing_left_ids.empty:
+        empty_event_rows = left_with_marker[
+            left_with_marker[left_marker].isin(missing_left_ids)
+        ].copy()
+        for col in merged.columns:
+            if col not in empty_event_rows.columns:
+                empty_event_rows[col] = np.nan
+        merged = pd.concat([merged, empty_event_rows[merged.columns]], ignore_index=True)
+
+    return merged.sort_values(left_marker).drop(columns=[left_marker]).reset_index(drop=True)
 
 
 def check_feature_leakage_correlation(

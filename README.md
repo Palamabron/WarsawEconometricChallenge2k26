@@ -9,8 +9,8 @@ Requires [uv](https://github.com/astral-sh/uv).
 ```bash
 uv venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate.bat
-make install               # core deps
-make install-dev           # add ruff, mypy, pytest
+make sync-core             # core deps
+make sync-dev              # add ruff, mypy, pytest
 make install-gpu           # add RAPIDS cuDF (CUDA 11.8+ required)
 ```
 
@@ -24,13 +24,20 @@ python main.py --optimize  # with Optuna hyperparameter search
 ## Development
 
 ```bash
-make format      # ruff format
-make lint        # ruff check
-make type-check  # mypy
-make test        # pytest
-make test-cov    # pytest with coverage
-make all         # all of the above
-make clean       # remove cache artifacts
+make fmt        # ruff auto-fix + format
+make lint       # ruff lint + format check
+make types      # mypy on src and tests
+make test       # pytest
+make test-cov   # pytest with coverage
+make all        # lint, types, and tests
+```
+
+Notebook checks are optional and skip cleanly when `notebooks/` is absent:
+
+```bash
+make nb-format  # nbQA ruff auto-fix + format via uv
+make nb-lint    # nbQA ruff lint + format check via uv
+make nb-types   # nbQA mypy via uv
 ```
 
 ## Project Structure
